@@ -45,6 +45,7 @@ CI checks formatting and Java compiler warnings, runs tests on JDK 21 and 25, an
 Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages. This keeps the history readable and supports release-please versioning. Add tests with behavior changes, avoid plaintext or secret material in logs and fixtures, and document security or compatibility changes.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [DEPENDENCIES.md](DEPENDENCIES.md) for the current contribution and dependency policies.
+See [BENCHMARKING.md](BENCHMARKING.md) for the reproducible corpus and measurement methodology; performance and accuracy thresholds remain open until agreed from empirical baselines.
 
 ## License
 
