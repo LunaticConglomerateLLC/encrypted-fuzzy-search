@@ -1,6 +1,6 @@
 # Threat model and leakage review
 
-**Status:** review draft. This is not a security certification or a final acceptance of leakage. The product direction remains a working assumption until the owner reviews the decision at the end of this document.
+**Status:** owner-accepted threat model and bounded leakage profile. This is not a security certification; the acceptance applies only to the scope and residual risks described here.
 
 ## Scope and security objective
 
@@ -79,18 +79,18 @@ Planned controls (to be verified as implementation work proceeds):
 
 Residual risk remains significant for an observer of the index or repeated searches. Keyed token equality/overlap and frequency can enable statistical inference; query patterns, result identifiers/counts, lengths, and timing can add evidence. A compromised application with active keys can expose plaintext. This design does not provide forward privacy, backward privacy, access-pattern hiding, padding, oblivious RAM, or zero leakage unless separately designed, implemented, and reviewed.
 
-## Security decision — owner review required
+## Security decision and acceptance
 
-**Working direction:** continue exploring authenticated field encryption with keyed exact and n-gram indexes, accepting that equality, frequency, overlap, candidate/access patterns, and operational metadata may be exposed as described above. This restates the project’s current vision; it is not a formal risk acceptance.
+**Accepted direction:** continue with authenticated field encryption and keyed exact and n-gram indexes, accepting that equality, frequency, overlap, candidate/access patterns, and operational metadata may be exposed as described above. This acceptance does not extend to unreviewed index strategies or imply a security certification.
 
-**Decision status: PENDING explicit owner acceptance.** This draft alone does not constitute acceptance. The owner must confirm that this bounded leakage is acceptable for the intended data and deployment, or identify additional constraints. If zero leakage to the database/search service is required, block production cryptographic/search implementation and revisit the architecture (including the performance and operational trade-offs of oblivious/private-search approaches). No production security guarantee is claimed either way by this draft.
+**Decision status: ACCEPTED by the project owner.** Implementations may proceed within this bounded leakage profile. If a deployment requires zero leakage to the database/search service, revisit the architecture (including the performance and operational trade-offs of oblivious/private-search approaches). This document makes no production security guarantee.
 
 | Review item | Current state |
 | --- | --- |
 | Threat model covers DB dump, query oracle, service compromise, and backups | Drafted above |
 | Leakage of planned exact and n-gram strategies documented | Drafted above; future strategies explicitly require separate review |
 | Mitigations and residual risks distinguished by attacker capability | Drafted above |
-| Owner acceptance of this leakage profile | **Pending** |
-| Production cryptographic implementation gate | **Blocked until explicit acceptance is recorded** |
+| Owner acceptance of this leakage profile | **Accepted** |
+| Production cryptographic implementation gate | **Open for implementations within the accepted scope** |
 
 Security behavior introduced by implementation must include automated tests and receive review appropriate to its risk.
