@@ -33,9 +33,12 @@ Prerequisites: JDK 21 or newer. Use the Gradle wrapper so builds use the reposit
 ```sh
 ./gradlew build
 ./gradlew test
+./gradlew check
+./gradlew cyclonedxBom
 ```
 
-Tests are required for implementation changes. The project target is at least 90% line coverage; CI will report and enforce the threshold as the test infrastructure is added.
+Tests are required for implementation changes. The project target is at least 90% line coverage per module containing production sources.
+CI checks formatting and Java compiler warnings, runs tests on JDK 21 and 25, and enforces the coverage threshold for modules with production code. The dependency audit and release workflow are described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Contributing
 

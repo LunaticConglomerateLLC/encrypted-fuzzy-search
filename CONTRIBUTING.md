@@ -5,7 +5,8 @@ This project is building a reusable Java and Kotlin library. Keep the core indep
 ## Changes
 
 - Include focused tests with every behavior change.
-- Maintain the project target of at least 90% line coverage; CI will enforce it once the test and coverage configuration is in place.
+- Maintain at least 90% line coverage per module containing production sources; CI enforces the gate.
+- Tests use TestNG. Keep randomized/property-style tests reproducible by using explicit fixed seeds and reporting the seed when a generated case fails.
 - Never add plaintext field values, normalized search values, raw grams, protected tokens, or secrets to logs or committed fixtures.
 - Document changes to cryptographic formats, normalization behavior, search guarantees, and leakage.
 - Keep public APIs compatible across Java and Kotlin callers.
@@ -21,6 +22,12 @@ docs: clarify index leakage
 ```
 
 Release-please will use these commits to propose version and changelog updates. Do not edit generated release notes or version files by hand unless the release workflow specifically requires it.
+
+CI runs `./gradlew clean check` on JDK 21 and 25. `check` includes formatting, compiler static warnings, tests, and a per-module 90% JaCoCo line-coverage gate for modules with production sources. Coverage reports are generated under each module's `build/reports/jacoco/test/` directory. New or updated dependencies are reviewed for vulnerabilities and allowed licenses; the scheduled dependency audit also generates a CycloneDX SBOM.
+
+### Release process
+
+Google release-please reads Conventional Commits on `main` and opens a release pull request that updates the changelog, manifest, and root Gradle version. Review and merge that pull request to publish the version tag and GitHub release. Repository administrators must configure an Actions secret named `RELEASE_PLEASE_TOKEN` with permission to create pull requests, update contents, and create releases; the workflow intentionally does not fall back to the default `GITHUB_TOKEN`. Release failures are reported by Actions and require fixing the workflow/configuration or secret before retrying.
 
 ## Dependencies
 
