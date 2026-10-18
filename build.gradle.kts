@@ -10,7 +10,7 @@ version = "0.1.0" // x-release-please-version
 spotless {
     java {
         target("**/src/**/*.java")
-        googleJavaFormat("1.28.0")
+        googleJavaFormat("1.30.0")
     }
     format("misc") {
         target("*.gradle.kts", "*.md", ".github/**/*.yml", ".github/**/*.yaml")
