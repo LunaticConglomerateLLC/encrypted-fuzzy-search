@@ -24,8 +24,25 @@ language-core┘
 
 ## Security and correctness boundaries
 
-Keyed indexes are not oblivious. Depending on the selected index, observers may learn equality, frequency, overlap, candidate identifiers, access patterns, lengths, or version metadata. The threat model and accepted leakage remain subject to TASK-2 review. If zero leakage is required, stop before production search implementation.
+Keyed indexes are not oblivious. Depending on the selected index, observers may learn equality, frequency, overlap, candidate identifiers, access patterns, lengths, or version metadata. The accepted threat model applies only to the exact and n-gram strategies documented in [THREAT_MODEL.md](THREAT_MODEL.md); future strategies require their own leakage review. If zero leakage is required, stop before production search implementation.
 
 Approximate retrieval reports empirical recall and does not claim exhaustive results. Only algorithms with a proved guarantee and stated limits may claim bounded completeness. Candidate limits and final similarity thresholds are separate controls.
 
 Do not log plaintext values, transformed search forms, raw grams, protected tokens, or secrets.
+
+## Field ciphertext format
+
+`crypto-core` uses AES-256-GCM (`AES/GCM/NoPadding`) with a 96-bit nonce and a 128-bit authentication tag. The cipher checks the key size when JCA exposes encoded key material; non-exportable keys must be provisioned as 256-bit AES keys by the key provider. The binary v1 envelope is:
+
+| Offset | Length | Contents |
+| --- | --- | --- |
+| 0 | 3 bytes | ASCII magic `EFS` |
+| 3 | 1 byte | Format version `0x01` |
+| 4 | 12 bytes | Fresh nonce |
+| 16 | Remaining bytes | Ciphertext followed by the 16-byte GCM tag |
+
+The four-byte magic/version header is authenticated as GCM associated data, along with caller-provided context. Callers should encode stable tenant, field, and record identity into that context using an unambiguous canonical encoding. Associated data is authenticated but not encrypted; the envelope does not store it. Text must be encoded by the caller (UTF-8 is the recommended default); the cipher API accepts bytes and supports arbitrary binary values.
+
+Each encryption uses a fresh random nonce. GCM requires nonce uniqueness for every encryption under a key. With random 96-bit IVs, NIST SP 800-38D limits the total number of encryptions to at most 2^32 for a key across all instances. Applications/key providers must track this global per-key limit and rotate before reaching it; the stateless cipher API cannot enforce a count shared across processes. [NIST SP 800-38D, sections 8.2–8.3](https://csrc.nist.gov/pubs/sp/800/38/d/final). The Java API uses the standard AES/GCM transformation and supplies the IV and tag length through `GCMParameterSpec`; see [Java `Cipher`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/javax/crypto/Cipher.html) and [GCMParameterSpec](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/javax/crypto/spec/GCMParameterSpec.html).
+
+Decryption rejects malformed, unsupported-version, or unauthenticated envelopes with the same `InvalidCiphertextException`. Applications must not expose distinguishable authentication errors to untrusted callers.
