@@ -56,3 +56,7 @@ Decryption rejects malformed, unsupported-version, or unauthenticated envelopes 
 ## Exact blind-index token
 
 `ExactBlindIndexer` accepts already-normalized bytes and creates a deterministic token with the derived tenant/field-scoped index key. The token is `EFSI` magic (4 bytes), format version `0x01` (1 byte), and a 32-byte HMAC-SHA-256 over the header followed by the normalized bytes. The transform is case/normalization agnostic by design; callers must use the same versioned canonicalization contract for ingest and query. Equal byte strings under the same derived key match; cross-tenant, cross-field, or key-version tokens differ. Tokens leak equality and frequency and are not ciphertext. Store only the token, never the normalized source bytes.
+
+## Canonical text bytes
+
+`language-core` transform `efs-text-nfc-utf8-v1` first validates Unicode scalar values, normalizes text to Unicode NFC, and encodes the result as UTF-8. It preserves case, whitespace, punctuation, compatibility characters, and transliteration; these are separate search transforms and must be versioned independently. Malformed UTF-16 containing unpaired surrogates is rejected instead of replacement-encoded. Shared compatibility vectors are in `language-core/src/test/resources/canonical-text-v1.tsv`; Java and Kotlin implementations should consume this same table. NFC canonical normalization keeps canonically equivalent strings byte-identical; compatibility folding such as NFKC is intentionally not part of v1.
