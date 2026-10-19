@@ -1,0 +1,17 @@
+name: encrypted-fuzzy-search-test
+
+services:
+  postgres:
+    image: postgres:18-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    environment:
+      POSTGRES_DB: efs_test
+      POSTGRES_USER: efs_test
+      POSTGRES_PASSWORD: efs_test_only
+    ports:
+      - "127.0.0.1:54329:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
