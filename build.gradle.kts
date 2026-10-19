@@ -74,7 +74,7 @@ subprojects {
             }
         }
         onlyIf {
-            extensions.getByType<SourceSetContainer>()
+            project.extensions.getByType<SourceSetContainer>()
                 .getByName("main").allSource.files.any { it.isFile }
         }
     }
