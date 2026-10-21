@@ -24,6 +24,8 @@ This project does not promise zero-leakage search. A database containing protect
 | `postgres-adapter` | PostgreSQL persistence and retrieval for protected tokens |
 | `spring-boot-starter` | Optional Spring Boot wiring; the core does not depend on Spring |
 
+See [SPRING_BOOT.md](SPRING_BOOT.md) for Spring Boot auto-configuration and Java/Kotlin consumer examples.
+
 The bytecode target is Java 21 to keep the library usable by applications on the previous LTS baseline; CI will check it on JDK 21 and JDK 25. Gradle Kotlin DSL was selected for the multi-module build and its direct fit with Java/Kotlin projects, while the core API remains Java-first. Kotlin interoperability will be maintained without making the core depend on a framework.
 
 ## Build and test

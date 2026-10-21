@@ -1,6 +1,6 @@
 # Threat model and leakage review
 
-**Status:** owner-accepted threat model and bounded leakage profile. This is not a security certification; the acceptance applies only to the scope and residual risks described here.
+**Status:** owner acceptance covers the exact and character n-gram baseline only. Leakage from the opt-in deletion, Soundex, prefix, and multilingual strategies is described below but still needs explicit owner acceptance before production use. This is not a security certification.
 
 ## Scope and security objective
 
@@ -8,7 +8,7 @@ The design stores application fields as randomized authenticated ciphertext and 
 
 This is a leakage-bearing searchable index, not oblivious computation. It does not promise to hide equality, token frequency, token overlap, result sets, or query/access patterns from an observer that can inspect the index and its use. Fuzzy search exposes more structure than an exact-only blind index because a value can map to multiple correlated tokens.
 
-In scope: field encryption and search-token generation, index persistence, query execution, database and backup exposure, application/key compromise, logs, operational metadata, and privileged insiders. This draft addresses the proposed exact and character n-gram strategies. Deletion-neighborhood, phonetic, prefix, LSH, and other strategies remain exploratory; each requires its own leakage review before adoption.
+In scope: field encryption and search-token generation, index persistence, query execution, database and backup exposure, application/key compromise, logs, operational metadata, and privileged insiders. Exact and character n-gram strategies are the accepted baseline. Deletion-neighborhood, phonetic, prefix, and multilingual strategies are implemented as explicit opt-ins; their leakage is documented here but they do not inherit the baseline's owner acceptance. LSH and other strategies remain exploratory.
 
 ## Assets
 
@@ -25,13 +25,13 @@ In scope: field encryption and search-token generation, index persistence, query
 ## Trust boundaries and assumptions
 
 1. **Caller to application:** callers are authenticated and authorized before query or write operations; input is treated as untrusted. The library cannot establish caller authorization by itself.
-2. **Application to key provider:** key material is obtained through a protected provider boundary, not stored alongside database data. Exact SPI, custody, and rotation mechanisms are still design decisions. Per-tenant, per-field, and per-purpose derivation is intended but must be verified in implementation and tests.
+2. **Application to key provider:** key material is obtained through a protected provider boundary, not stored alongside database data. `MasterKeyProvider`, tenant/field/purpose-separated derivation, and application-managed key rotation are implemented. Custody, deployment controls, and provider recovery remain host responsibilities.
 3. **Application to database:** the application sends ciphertext and keyed tokens. The database is not trusted with plaintext or keys. Database operators can observe persisted records, token equality/frequency/overlap, identifiers, and query/access behavior available to their role.
 4. **Application process:** authorized application code must see plaintext during ingest and final verification. A fully compromised process while keys or plaintext are available can therefore read or misuse them; field encryption does not protect against that compromise.
 5. **Backups and replicas:** they are treated as database copies with equivalent leakage and retention risk. Encryption of backup media is useful defense in depth, not a remedy for leakage in an exposed keyed index.
 6. **Logs and telemetry:** plaintext, raw/transformed search forms, grams, tokens, and secrets must not be logged. Identifiers, timings, request counts, result counts, and error patterns can still reveal operational information and should be access-controlled and minimized.
 
-Assumptions: authenticated encryption is used with correct nonce handling; index tokens are keyed with a secure MAC/PRF; TLS and deployment access controls are configured by the host application; and a database-only attacker does not also possess the index key. Algorithm selection and formats are intentionally not fixed by this threat-model draft.
+Assumptions: the AES-GCM envelope, HKDF-SHA-256 derivation, and HMAC-SHA-256 token formats described in `ARCHITECTURE.md` are implemented correctly; TLS and deployment access controls are configured by the host application; and a database-only attacker does not also possess the index key.
 
 ## Adversaries and scenarios
 
@@ -48,15 +48,16 @@ Out of scope for the library alone: host compromise, malicious runtime/JVM, phys
 
 ## Leakage profile by index strategy
 
-The following describes what a database/search observer may learn from storage and query behavior. Exact leakage depends on eventual schema, query plan, batching, and adapter; implementation must refine this table before release.
+The following describes what a database/search observer may learn from the current schema, query plan, strategy implementation, and caller-visible behavior. Adapter or workload changes can alter these observations and should trigger review.
 
 | Strategy | Persisted leakage | Query-time / repeated-query leakage | Notes |
 | --- | --- | --- | --- |
 | Exact keyed blind index | Equality of the same scoped normalized value across records; token frequency and posting-list size; record/tenant/field scope and token/key/transform version metadata if stored | Repeated query-token equality (search pattern); matching record identifiers and result count (access pattern); timing and response size | A keyed token prevents a database-only observer without the key from directly computing tokens for arbitrary guesses, but equality and frequency remain visible. Scope separation prevents cross-domain equality only if correctly implemented. |
 | Character n-gram keyed index (bigram/trigram) | Equality and frequency of each gram token; number/distribution of tokens per value; co-occurrence/overlap of tokens within a record; posting-list sizes; identifiers and version metadata | Query token set and repeated token equality; intersections/overlap, candidate identifiers, candidate/result counts and ordering if exposed; latency and response sizes | A collection of individually keyed tokens still leaks structure through which tokens co-occur and overlap. Short values, common names, and skewed language distributions may be especially distinguishable. |
-| Bounded deletion-neighborhood (future) | Potentially many correlated variant tokens per value, their frequencies/co-occurrence, volume, and posting-list sizes | Query variants and their overlap, candidate IDs/counts, and repeated patterns | Not approved by this document; review token expansion, candidate limits, and leakage before implementation. |
-| Transliteration and language variants (implemented for explicit `zh-Hans` profile v2) | Equality/frequency and co-occurrence across original, Han-Latin, tone-folded, and compact forms; profile/version metadata can reveal the configured transformation | Expanded query-token equality and overlap, candidate/match sets, and repeated variant patterns; output can reveal which variants matched if returned | Tone folding and compact forms merge distinct inputs (for example, `吗` and `妈` both produce `ma`). This is transliteration, not translation; ICU returns one Han reading, not every reading. Use only with caller-supplied language metadata, preserve original text, enforce the documented bounds, and review reindexing when the transform ID changes. See `ARCHITECTURE.md` for behavior and limits. |
-| Phonetic, prefix, aliases, and other language variants (future) | Potential equality/frequency and co-occurrence of normalized variants, their volume, and posting-list sizes | Variant-level query repetition and match/candidate sets; output can reveal which variants matched if returned | Not implemented in this milestone; assess strategy-specific leakage and bounds before adoption. |
+| Bounded deletion-neighborhood (implemented, opt-in) | Equality and frequency of original/deletion variants; correlated variants co-occurring in a record; token count/volume and posting-list sizes | Query-variant equality/overlap, candidate identifiers/counts, and repeated patterns | Radius 1 or 2, input length and token-count bounds are enforced. Expansion can be quadratic at radius 2. False candidates still require decrypt-and-score verification. Not included in current owner acceptance. |
+| Transliteration and language variants (implemented for explicit `zh-Hans` profile) | Equality/frequency and co-occurrence across original, Han-Latin, tone-folded, and compact forms; profile/version metadata can reveal the configured transformation | Expanded query-token equality and overlap, candidate/match sets, and repeated variant patterns; output can reveal which variants matched if returned | Tone folding and compact forms merge distinct inputs (for example, `吗` and `妈` both produce `ma`). This is transliteration, not translation; ICU returns one Han reading, not every reading. Use only with caller-supplied language metadata, preserve original text, enforce documented bounds, and review reindexing when transform ID changes. This profile is outside current owner acceptance. |
+| English ASCII Soundex (implemented, opt-in) | Equality/frequency of phonetic codes, code collisions, and token co-occurrence | Candidate IDs/counts and repeated phonetic query patterns | Distinct names intentionally collide (for example, `Robert` and `Rupert`); only one ASCII A-Z word is encoded, revealing the Soundex class for supported input. Not included in current owner acceptance. |
+| Protected prefixes (implemented, opt-in) | Equality/frequency and relations between prefixes at configured lengths; token count can reveal lengths in that range | Candidate IDs/counts, prefix-query repetition, and prefix overlap | Default prefix lengths are 2 through 8 code points; shared prefixes intentionally collide. Not included in current owner acceptance. |
 | LSH / ANN / other approximate strategy (future) | Bucket/signature equality, distribution, collision and volume patterns, plus index metadata | Bucket probes, candidate/access patterns, result volumes, and timing | No privacy or leakage claim is made; assess separately before selection. |
 
 All strategies may additionally leak stable row identifiers, tenant/field partitioning, ciphertext and token lengths, record counts, insert/delete/update cadence, key/algorithm/normalization versions, and observable query frequency. Even if direct query tokens are not persisted, deterministic equality and result correlations across observations can expose a search pattern. Candidate IDs and result sizes can support inference when combined with auxiliary data. Padding, batching, or access-pattern defenses are not currently part of the design and must not be implied.
@@ -65,7 +66,7 @@ The literature on searchable encryption treats leakage as an explicit part of th
 
 ## Mitigations and residual risks
 
-Planned controls (to be verified as implementation work proceeds):
+Controls implemented in the library or required from the host application:
 
 - Use randomized authenticated encryption for stored field values; reject tampered ciphertext during decryption.
 - Derive independent keys/tokens by purpose and scope (at least tenant, field, and version); never use raw plaintext hashes as tokens. Key separation does not hide within-scope equality.
@@ -82,16 +83,18 @@ Residual risk remains significant for an observer of the index or repeated searc
 
 ## Security decision and acceptance
 
-**Accepted direction:** continue with authenticated field encryption and keyed exact and n-gram indexes, accepting that equality, frequency, overlap, candidate/access patterns, and operational metadata may be exposed as described above. This acceptance does not extend to unreviewed index strategies or imply a security certification.
+**Accepted direction:** authenticated field encryption and keyed exact and character n-gram indexes may be used with the equality, frequency, overlap, candidate/access-pattern, and operational-metadata leakage described above. This acceptance does not extend to optional deletion, Soundex, prefix, or multilingual strategies and does not imply a security certification.
 
 **Decision status: ACCEPTED by the project owner.** Implementations may proceed within this bounded leakage profile. If a deployment requires zero leakage to the database/search service, revisit the architecture (including the performance and operational trade-offs of oblivious/private-search approaches). This document makes no production security guarantee.
 
 | Review item | Current state |
 | --- | --- |
 | Threat model covers DB dump, query oracle, service compromise, and backups | Drafted above |
-| Leakage of planned exact and n-gram strategies documented | Drafted above; future strategies explicitly require separate review |
+| Leakage of exact and n-gram strategies documented | Drafted above and owner-accepted |
+| Leakage of implemented optional deletion, Soundex, prefix, and multilingual strategies documented | Drafted above; owner acceptance still required before production use |
 | Mitigations and residual risks distinguished by attacker capability | Drafted above |
-| Owner acceptance of this leakage profile | **Accepted** |
+| Owner acceptance of exact/n-gram baseline leakage | **Accepted** |
+| Owner acceptance of optional-strategy leakage | **Pending** |
 | Production cryptographic implementation gate | **Open for implementations within the accepted scope** |
 
 Security behavior introduced by implementation must include automated tests and receive review appropriate to its risk.
