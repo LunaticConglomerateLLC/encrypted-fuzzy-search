@@ -9,6 +9,7 @@ import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ExactBlindIn
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.NgramBlindIndexer;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ScopedKeyDeriver;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.CanonicalTextNormalizer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.TransliterationProfile;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.EncryptedFuzzySearchService;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.FuzzySearchResult;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.ProtectedNgramStrategy;
@@ -71,6 +72,22 @@ public class PostgresEncryptedFuzzySearchFunctionalTest {
     assertEquals(exact.size(), 1);
     assertEquals(exact.get(0).value(), "Caf\u00e9");
     assertTrue(none.isEmpty());
+  }
+
+  @Test
+  public void searchesChineseIndexUsingToneFoldedPinyinAgainstPostgres() throws Exception {
+    TransliterationProfile chinese =
+        TransliterationProfile.forLanguageTag(
+            TransliterationProfile.SIMPLIFIED_CHINESE_LANGUAGE_TAG);
+    service.indexValue("tenant-a", "name", "entity-cn-001", "key-v1", "你好", chinese);
+
+    List<FuzzySearchResult> matches =
+        service.search("tenant-a", "name", "key-v1", "ni hao", 25, 1.0, chinese);
+
+    assertEquals(matches.size(), 1);
+    assertEquals(matches.get(0).recordId(), "entity-cn-001");
+    assertEquals(matches.get(0).value(), "你好");
+    assertEquals(matches.get(0).similarity(), 1.0);
   }
 
   @Test

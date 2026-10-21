@@ -1,0 +1,10 @@
+# outcome<TAB>language-tag<TAB>query<TAB>expected-record
+positive	zh-Hans	ni hao	greeting
+negative	zh-Hans	Москва	-
+negative	zh-Hans	Αθήνα	-
+negative	zh-Hans	東京	-
+negative	zh-Hans	القاهرة	-
+unsupported	ru	Москва	-
+unsupported	el	Αθήνα	-
+unsupported	ja-JP	東京	-
+unsupported	ar	القاهرة	-

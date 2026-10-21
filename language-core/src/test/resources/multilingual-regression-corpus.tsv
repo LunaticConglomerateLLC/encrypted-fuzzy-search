@@ -1,0 +1,7 @@
+# language-tag<TAB>input<TAB>expected
+zh-Hans	你好	ni hao
+zh-Hans	nǐ hǎo	ni hao
+ru	Москва	UNSUPPORTED
+el	Αθήνα	UNSUPPORTED
+ja-JP	東京	UNSUPPORTED
+ar	القاهرة	UNSUPPORTED
