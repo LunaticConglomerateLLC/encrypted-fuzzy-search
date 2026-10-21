@@ -7,10 +7,11 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import javax.crypto.SecretKey;
 
 /** Generates bounded, deduplicated protected bigram or trigram tokens. */
-public final class ProtectedNgramStrategy {
+public final class ProtectedNgramStrategy implements ProtectedIndexStrategy {
   public static final int DEFAULT_MAX_INPUT_CODE_POINTS = 4096;
   private static final int TOKEN_FORMAT_VERSION = 1;
 
@@ -48,7 +49,49 @@ public final class ProtectedNgramStrategy {
 
   /** Returns a stable identifier suitable for storing alongside protected postings. */
   public String strategyId() {
-    return "efs-ngram-" + gramSize;
+    return strategyId(null);
+  }
+
+  @Override
+  public String strategyId(String transformId) {
+    String identifier =
+        transformId == null
+            ? "efs-ngram-" + gramSize
+            : "efs-l10n-" + requireTransformId(transformId) + "-ngram-" + gramSize;
+    if (identifier.length() > 64) {
+      throw new IllegalArgumentException(
+          "transform profile produces an overlong token strategy id");
+    }
+    return identifier;
+  }
+
+  @Override
+  public int formatVersion() {
+    return TOKEN_FORMAT_VERSION;
+  }
+
+  @Override
+  public IndexKeyScope keyScope() {
+    return IndexKeyScope.TENANT_FIELD_KEY_VERSION;
+  }
+
+  @Override
+  public CandidateMatchMode candidateMatchMode() {
+    return CandidateMatchMode.ANY_SHARED_TOKEN;
+  }
+
+  @Override
+  public Set<IndexLeakage> leakageMetadata() {
+    return Set.of(IndexLeakage.EQUALITY, IndexLeakage.FREQUENCY, IndexLeakage.TOKEN_OVERLAP);
+  }
+
+  @Override
+  public List<ProtectedToken> createTokens(
+      SecretKey indexKey, String canonicalText, String transformId)
+      throws GeneralSecurityException {
+    return createTokens(indexKey, canonicalText).stream()
+        .map(token -> new ProtectedToken(strategyId(transformId), formatVersion(), token))
+        .toList();
   }
 
   /**
@@ -91,9 +134,14 @@ public final class ProtectedNgramStrategy {
   /** Returns protected tokens annotated with this strategy's stable identifier and format. */
   public List<ProtectedToken> createProtectedTokens(SecretKey indexKey, String canonicalText)
       throws GeneralSecurityException {
-    return createTokens(indexKey, canonicalText).stream()
-        .map(token -> new ProtectedToken(strategyId(), TOKEN_FORMAT_VERSION, token))
-        .toList();
+    return createTokens(indexKey, canonicalText, null);
+  }
+
+  private static String requireTransformId(String transformId) {
+    if (transformId.isBlank() || transformId.length() > 64) {
+      throw new IllegalArgumentException("transformId must contain 1 to 64 characters");
+    }
+    return transformId;
   }
 
   private void addToken(
