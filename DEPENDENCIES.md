@@ -4,13 +4,14 @@ The project is licensed under Apache-2.0. It is a permissive license for reuse a
 
 ## Default allowlist
 
-Dependencies using Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, or EPL-2.0 may be used after checking the exact license and version. EPL-2.0 is permitted for build and test tooling as well as runtime dependencies.
+Dependencies using Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, EPL-2.0, or Unicode-3.0 may be used after checking the exact license and version. EPL-2.0 and Unicode-3.0 are permitted for build and test tooling as well as runtime dependencies.
 
 Do not add proprietary, commercial-only, source-available, or non-commercial dependencies. Licenses outside the allowlist, including copyleft licenses, require explicit review before adoption. Apply the same review to transitive dependencies.
 
 ## Current module dependencies
 
 - `postgres-adapter`: PostgreSQL JDBC driver (`org.postgresql:postgresql:42.7.13`) at runtime to implement the JDBC adapter. The driver is licensed under BSD-2-Clause; tests use only the standard JDBC API and the same runtime driver.
+- `language-core`: ICU4J (`com.ibm.icu:icu4j:78.3`) at runtime for deterministic, language-profiled Unicode transliteration. ICU4J is licensed under Unicode-3.0; the transform profile pins its provider version as part of the persisted transform identifier.
 
 ## Review expectations
 

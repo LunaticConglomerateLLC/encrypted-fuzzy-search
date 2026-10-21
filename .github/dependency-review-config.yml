@@ -10,3 +10,4 @@ allow-licenses:
   - ISC
   - 0BSD
   - EPL-2.0
+  - Unicode-3.0
