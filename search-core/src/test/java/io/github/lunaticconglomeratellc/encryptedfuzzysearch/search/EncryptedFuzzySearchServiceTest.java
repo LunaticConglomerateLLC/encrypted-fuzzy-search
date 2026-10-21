@@ -67,6 +67,51 @@ public class EncryptedFuzzySearchServiceTest {
   }
 
   @Test
+  public void deletionNeighborhoodRetrievesEditsThenVerifiesExactDistance() throws Exception {
+    InMemoryRepository editRepository = new InMemoryRepository();
+    EncryptedFuzzySearchService editService =
+        new EncryptedFuzzySearchService(
+            keyDeriver(new AtomicInteger()),
+            new AuthenticatedFieldCipher(),
+            new CanonicalTextNormalizer(),
+            List.of(
+                new ProtectedExactStrategy(new ExactBlindIndexer()),
+                new ProtectedDeletionStrategy(new ExactBlindIndexer())),
+            editRepository);
+    editService.indexValue("tenant-a", "name", "inserted", "key-v1", "cart");
+    editService.indexValue("tenant-a", "name", "substituted", "key-v1", "cat");
+
+    List<FuzzySearchResult> insertionOrDeletion =
+        editService.search("tenant-a", "name", "key-v1", "cat", 10, 0.7);
+    List<FuzzySearchResult> queryInsertion =
+        editService.search("tenant-a", "name", "key-v1", "cart", 10, 0.7);
+    List<FuzzySearchResult> substitution =
+        editService.search("tenant-a", "name", "key-v1", "cut", 10, 0.6);
+
+    assertTrue(
+        insertionOrDeletion.stream().anyMatch(result -> result.recordId().equals("inserted")));
+    assertTrue(queryInsertion.stream().anyMatch(result -> result.recordId().equals("substituted")));
+    assertEquals(substitution.size(), 1);
+    assertEquals(substitution.getFirst().recordId(), "substituted");
+
+    InMemoryRepository verificationRepository = new InMemoryRepository();
+    EncryptedFuzzySearchService verificationService =
+        new EncryptedFuzzySearchService(
+            keyDeriver(new AtomicInteger()),
+            new AuthenticatedFieldCipher(),
+            new CanonicalTextNormalizer(),
+            List.of(
+                new ProtectedExactStrategy(new ExactBlindIndexer()),
+                new ProtectedDeletionStrategy(new ExactBlindIndexer())),
+            verificationRepository);
+    verificationService.indexValue("tenant-a", "name", "distant", "key-v1", "abcd");
+
+    assertTrue(
+        verificationService.search("tenant-a", "name", "key-v1", "abxy", 10, 0.75).isEmpty());
+    assertTrue(verificationRepository.lastCandidateCount > 0);
+  }
+
+  @Test
   public void indexesEncryptedValuesAndReturnsVerifiedTypoMatchesInStableOrder() throws Exception {
     InMemoryRepository repository = new InMemoryRepository();
     EncryptedFuzzySearchService service = service(new AtomicInteger(), repository);
@@ -398,6 +443,7 @@ public class EncryptedFuzzySearchServiceTest {
     private final List<EncryptedSearchDocument> documents = new ArrayList<>();
     private String transformOverride;
     private String recordIdOverride;
+    private int lastCandidateCount;
 
     @Override
     public void initializeSchema() {}
@@ -447,7 +493,9 @@ public class EncryptedFuzzySearchServiceTest {
           Comparator.comparingInt(SearchCandidate::overlapCount)
               .reversed()
               .thenComparing(SearchCandidate::recordId));
-      return matches.stream().limit(limit).toList();
+      List<SearchCandidate> results = matches.stream().limit(limit).toList();
+      lastCandidateCount = results.size();
+      return results;
     }
 
     @Override
