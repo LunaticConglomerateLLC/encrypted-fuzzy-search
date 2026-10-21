@@ -16,9 +16,11 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import javax.crypto.SecretKey;
 
 /**
@@ -32,14 +34,10 @@ public final class EncryptedFuzzySearchService {
 
   private static final byte[] AAD_LABEL =
       "efs-search-record-aad-v1".getBytes(StandardCharsets.US_ASCII);
-  private static final String EXACT_STRATEGY_ID = "efs-exact";
-
   private final ScopedKeyDeriver keyDeriver;
   private final AuthenticatedFieldCipher fieldCipher;
-  private final ExactBlindIndexer exactBlindIndexer;
   private final CanonicalTextNormalizer textNormalizer;
-  private final ProtectedNgramStrategy bigrams;
-  private final ProtectedNgramStrategy trigrams;
+  private final List<ProtectedIndexStrategy> protectedIndexStrategies;
   private final TokenIndexRepository repository;
   private final CodePointLevenshteinScorer scorer;
   private final Icu4jTransliterationProvider transliterationProvider;
@@ -55,18 +53,28 @@ public final class EncryptedFuzzySearchService {
       ProtectedNgramStrategy bigrams,
       ProtectedNgramStrategy trigrams,
       TokenIndexRepository repository) {
+    this(
+        keyDeriver,
+        fieldCipher,
+        textNormalizer,
+        legacyStrategies(exactBlindIndexer, bigrams, trigrams),
+        repository);
+  }
+
+  /** Creates the service with an ordered set of protected-index strategy implementations. */
+  public EncryptedFuzzySearchService(
+      ScopedKeyDeriver keyDeriver,
+      AuthenticatedFieldCipher fieldCipher,
+      CanonicalTextNormalizer textNormalizer,
+      List<? extends ProtectedIndexStrategy> protectedIndexStrategies,
+      TokenIndexRepository repository) {
     this.keyDeriver = Objects.requireNonNull(keyDeriver, "keyDeriver");
     this.fieldCipher = Objects.requireNonNull(fieldCipher, "fieldCipher");
-    this.exactBlindIndexer = Objects.requireNonNull(exactBlindIndexer, "exactBlindIndexer");
     this.textNormalizer = Objects.requireNonNull(textNormalizer, "textNormalizer");
-    this.bigrams = Objects.requireNonNull(bigrams, "bigrams");
-    this.trigrams = Objects.requireNonNull(trigrams, "trigrams");
+    this.protectedIndexStrategies = validateStrategies(protectedIndexStrategies);
     this.repository = Objects.requireNonNull(repository, "repository");
     this.scorer = new CodePointLevenshteinScorer();
     this.transliterationProvider = new Icu4jTransliterationProvider();
-    if (bigrams.gramSize() != 2 || trigrams.gramSize() != 3) {
-      throw new IllegalArgumentException("service requires bigram and trigram strategies");
-    }
   }
 
   /** Normalizes, encrypts and indexes one value using tenant/field/record-bound AAD. */
@@ -109,7 +117,7 @@ public final class EncryptedFuzzySearchService {
       SecretKey indexKey = keyDeriver.deriveIndexKey(keyId, tenantId, fieldId);
       List<ProtectedToken> tokens =
           profile == null
-              ? createTokens(indexKey, canonicalValue, plaintext)
+              ? createStrategyTokens(indexKey, canonicalValue, null)
               : createMultilingualTokens(indexKey, canonicalValue, profile);
       SecretKey encryptionKey = keyDeriver.deriveEncryptionKey(keyId, tenantId, fieldId);
       ciphertext = fieldCipher.encrypt(encryptionKey, plaintext, associatedData);
@@ -193,18 +201,13 @@ public final class EncryptedFuzzySearchService {
     }
 
     String canonicalQuery = textNormalizer.normalize(query);
-    byte[] queryBytes = canonicalQuery.getBytes(StandardCharsets.UTF_8);
     List<SearchCandidate> candidates;
-    try {
-      SecretKey indexKey = keyDeriver.deriveIndexKey(keyId, tenantId, fieldId);
-      List<ProtectedToken> queryTokens =
-          profile == null
-              ? createTokens(indexKey, canonicalQuery, queryBytes)
-              : createMultilingualTokens(indexKey, canonicalQuery, profile);
-      candidates = repository.findCandidates(tenantId, fieldId, keyId, queryTokens, candidateLimit);
-    } finally {
-      Arrays.fill(queryBytes, (byte) 0);
-    }
+    SecretKey indexKey = keyDeriver.deriveIndexKey(keyId, tenantId, fieldId);
+    List<ProtectedToken> queryTokens =
+        profile == null
+            ? createStrategyTokens(indexKey, canonicalQuery, null)
+            : createMultilingualTokens(indexKey, canonicalQuery, profile);
+    candidates = repository.findCandidates(tenantId, fieldId, keyId, queryTokens, candidateLimit);
 
     List<FuzzySearchResult> matches = new ArrayList<>();
     for (SearchCandidate candidate : candidates) {
@@ -250,18 +253,70 @@ public final class EncryptedFuzzySearchService {
     repository.delete(tenantId, fieldId, recordId);
   }
 
-  private List<ProtectedToken> createTokens(
-      SecretKey indexKey, String canonicalText, byte[] canonicalBytes)
+  private List<ProtectedToken> createStrategyTokens(
+      SecretKey indexKey, String canonicalText, String transformId)
       throws GeneralSecurityException {
     List<ProtectedToken> tokens = new ArrayList<>();
-    tokens.add(
-        new ProtectedToken(
-            EXACT_STRATEGY_ID,
-            exactBlindIndexer.formatVersion(),
-            exactBlindIndexer.createToken(indexKey, canonicalBytes)));
-    tokens.addAll(bigrams.createProtectedTokens(indexKey, canonicalText));
-    tokens.addAll(trigrams.createProtectedTokens(indexKey, canonicalText));
+    Set<String> strategyIds = new HashSet<>();
+    for (ProtectedIndexStrategy strategy : protectedIndexStrategies) {
+      String strategyId = strategy.strategyId(transformId);
+      if (!strategyIds.add(strategyId)) {
+        throw new GeneralSecurityException("configured strategies produced a namespace collision");
+      }
+      List<ProtectedToken> generated =
+          Objects.requireNonNull(
+              strategy.createTokens(indexKey, canonicalText, transformId), "strategy tokens");
+      for (ProtectedToken token : generated) {
+        if (!strategyId.equals(token.strategyId())
+            || token.formatVersion() != strategy.formatVersion()) {
+          throw new GeneralSecurityException(
+              "strategy emitted tokens outside its declared namespace");
+        }
+        tokens.add(token);
+      }
+    }
     return List.copyOf(tokens);
+  }
+
+  private static List<ProtectedIndexStrategy> legacyStrategies(
+      ExactBlindIndexer exactBlindIndexer,
+      ProtectedNgramStrategy bigrams,
+      ProtectedNgramStrategy trigrams) {
+    Objects.requireNonNull(exactBlindIndexer, "exactBlindIndexer");
+    Objects.requireNonNull(bigrams, "bigrams");
+    Objects.requireNonNull(trigrams, "trigrams");
+    if (bigrams.gramSize() != 2 || trigrams.gramSize() != 3) {
+      throw new IllegalArgumentException("service requires bigram and trigram strategies");
+    }
+    return List.of(new ProtectedExactStrategy(exactBlindIndexer), bigrams, trigrams);
+  }
+
+  private static List<ProtectedIndexStrategy> validateStrategies(
+      List<? extends ProtectedIndexStrategy> strategies) {
+    Objects.requireNonNull(strategies, "protectedIndexStrategies");
+    if (strategies.isEmpty()) {
+      throw new IllegalArgumentException("at least one protected-index strategy is required");
+    }
+    List<ProtectedIndexStrategy> immutableStrategies = List.copyOf(strategies);
+    Set<String> identifiers = new HashSet<>();
+    for (ProtectedIndexStrategy strategy : immutableStrategies) {
+      Objects.requireNonNull(strategy, "protected-index strategy");
+      String strategyId = Objects.requireNonNull(strategy.strategyId(null), "strategyId");
+      if (strategyId.isBlank() || strategyId.length() > 64 || !identifiers.add(strategyId)) {
+        throw new IllegalArgumentException("protected-index strategy IDs must be valid and unique");
+      }
+      if (strategy.formatVersion() < 1) {
+        throw new IllegalArgumentException("strategy format version must be positive");
+      }
+      if (strategy.keyScope() != IndexKeyScope.TENANT_FIELD_KEY_VERSION) {
+        throw new IllegalArgumentException("unsupported protected-index key scope");
+      }
+      if (strategy.candidateMatchMode() != CandidateMatchMode.ANY_SHARED_TOKEN) {
+        throw new IllegalArgumentException("unsupported protected-index candidate match mode");
+      }
+      Objects.requireNonNull(strategy.leakageMetadata(), "strategy leakage metadata");
+    }
+    return immutableStrategies;
   }
 
   private List<ProtectedToken> createMultilingualTokens(
@@ -270,46 +325,14 @@ public final class EncryptedFuzzySearchService {
     LinkedHashSet<ProtectedToken> tokens = new LinkedHashSet<>();
     for (TransliterationVariant variant :
         transliterationProvider.variants(canonicalText, profile)) {
-      addMultilingualTokens(tokens, exactTokens(indexKey, variant.value(), profile));
-      addMultilingualTokens(tokens, ngramTokens(indexKey, variant.value(), profile, bigrams));
-      addMultilingualTokens(tokens, ngramTokens(indexKey, variant.value(), profile, trigrams));
+      addMultilingualTokens(
+          tokens, createStrategyTokens(indexKey, variant.value(), profile.transformId()));
     }
     if (tokens.size() > MAX_MULTILINGUAL_TOKEN_COUNT) {
       throw new IllegalArgumentException(
           "multilingual variants exceed maximum of " + MAX_MULTILINGUAL_TOKEN_COUNT + " tokens");
     }
     return List.copyOf(tokens);
-  }
-
-  private List<ProtectedToken> exactTokens(
-      SecretKey indexKey, String value, TransliterationProfile profile)
-      throws GeneralSecurityException {
-    byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-    try {
-      return List.of(
-          new ProtectedToken(
-              "efs-xexact-" + profile.transformId(),
-              exactBlindIndexer.formatVersion(),
-              exactBlindIndexer.createToken(indexKey, bytes)));
-    } finally {
-      Arrays.fill(bytes, (byte) 0);
-    }
-  }
-
-  private List<ProtectedToken> ngramTokens(
-      SecretKey indexKey,
-      String value,
-      TransliterationProfile profile,
-      ProtectedNgramStrategy strategy)
-      throws GeneralSecurityException {
-    String strategyId = "efs-l10n-" + profile.transformId() + "-ngram-" + strategy.gramSize();
-    if (strategyId.length() > 64) {
-      throw new IllegalArgumentException(
-          "transform profile produces an overlong token strategy id");
-    }
-    return strategy.createTokens(indexKey, value).stream()
-        .map(token -> new ProtectedToken(strategyId, 1, token))
-        .toList();
   }
 
   private static void addMultilingualTokens(

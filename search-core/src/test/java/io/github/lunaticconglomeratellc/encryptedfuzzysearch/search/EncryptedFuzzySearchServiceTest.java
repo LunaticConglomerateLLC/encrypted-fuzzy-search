@@ -21,12 +21,51 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.testng.annotations.Test;
 
 public class EncryptedFuzzySearchServiceTest {
+  @Test
+  public void acceptsPluggableStrategiesAndPersistsTheirSeparateNamespaces() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service =
+        new EncryptedFuzzySearchService(
+            keyDeriver(new AtomicInteger()),
+            new AuthenticatedFieldCipher(),
+            new CanonicalTextNormalizer(),
+            List.of(
+                new ProtectedExactStrategy(new ExactBlindIndexer()),
+                new ProtectedNgramStrategy(2, new NgramBlindIndexer())),
+            repository);
+
+    service.indexValue("tenant-a", "name", "alice", "key-v1", "Alice");
+
+    assertEquals(
+        repository.documents.getFirst().protectedTokens().stream()
+            .map(ProtectedToken::strategyId)
+            .collect(java.util.stream.Collectors.toSet()),
+        Set.of("efs-exact", "efs-ngram-2"));
+    assertEquals(service.search("tenant-a", "name", "key-v1", "Alice", 10, 1.0).size(), 1);
+  }
+
+  @Test
+  public void rejectsDuplicateStrategyNamespaces() {
+    ProtectedIndexStrategy bigrams = new ProtectedNgramStrategy(2, new NgramBlindIndexer());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EncryptedFuzzySearchService(
+                keyDeriver(new AtomicInteger()),
+                new AuthenticatedFieldCipher(),
+                new CanonicalTextNormalizer(),
+                List.of(bigrams, bigrams),
+                new InMemoryRepository()));
+  }
+
   @Test
   public void indexesEncryptedValuesAndReturnsVerifiedTypoMatchesInStableOrder() throws Exception {
     InMemoryRepository repository = new InMemoryRepository();
