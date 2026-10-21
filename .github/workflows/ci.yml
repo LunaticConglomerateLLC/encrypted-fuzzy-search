@@ -19,6 +19,8 @@ jobs:
         java: ['21', '25']
     steps:
       - uses: actions/checkout@v6
+      - name: Start disposable PostgreSQL test database
+        run: docker compose -f compose.test.yaml up --detach --wait --wait-timeout 60
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -37,6 +39,9 @@ jobs:
             **/build/reports/tests/**
             **/build/reports/jacoco/**
           if-no-files-found: ignore
+      - name: Stop and remove disposable PostgreSQL test database
+        if: always()
+        run: docker compose -f compose.test.yaml down --volumes --remove-orphans
 
   dependency-review:
     if: github.event_name == 'pull_request'

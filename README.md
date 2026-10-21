@@ -2,7 +2,7 @@
 
 Encrypted Fuzzy Search is an early-stage Java and Kotlin library project for searching encrypted application data. The goal is to support exact and approximate candidate retrieval without persisting plaintext search terms, while making the security and accuracy trade-offs visible to application teams.
 
-The project is currently in its bootstrap milestone. The module layout and build are being established; there is no released artifact or stable API yet.
+The project has released v0.1.0, its cryptographic foundation. The v0.2 milestone is developing protected fuzzy indexes, PostgreSQL-backed candidate retrieval, and functional verification. APIs remain early-stage and may change.
 
 ## What the library is intended to provide
 
@@ -28,14 +28,16 @@ The bytecode target is Java 21 to keep the library usable by applications on the
 
 ## Build and test
 
-Prerequisites: JDK 21 or newer. Use the Gradle wrapper so builds use the repository-pinned Gradle version.
+Prerequisites: JDK 21 or newer and Docker Compose v2. Use the Gradle wrapper so builds use the repository-pinned Gradle version. The full test/check suite uses a disposable local PostgreSQL service:
 
 ```sh
-./gradlew build
-./gradlew test
-./gradlew check
+docker compose -f compose.test.yaml up --detach --wait
+./gradlew --no-daemon clean check
+docker compose -f compose.test.yaml down --volumes --remove-orphans
 ./gradlew cyclonedxBom
 ```
+
+The Compose database binds only to loopback, uses test-only credentials, and stores data in the disposable container layer. For a failed test run, stop and remove it with the same `docker compose ... down` command.
 
 Tests are required for implementation changes. The project target is at least 90% line coverage per module containing production sources.
 CI checks formatting and Java compiler warnings, runs tests on JDK 21 and 25, and enforces the coverage threshold for modules with production code. The dependency audit and release workflow are described in [CONTRIBUTING.md](CONTRIBUTING.md).

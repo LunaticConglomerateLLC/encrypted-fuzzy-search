@@ -1,6 +1,6 @@
 # Matching corpus and benchmark methodology
 
-**Status:** methodology only. No search implementation or empirical accuracy/performance results exist yet. No pass thresholds or service-level objectives are set here.
+**Status:** methodology and exploratory baseline runner. No accuracy/latency thresholds or service-level objectives have been approved.
 
 ## Goals and comparison boundary
 
@@ -79,3 +79,30 @@ The following remain open until owners review empirical baselines and intended d
 - Whether any real-data corpus is permitted and under what governance.
 
 Do not claim an accuracy, scale, or latency guarantee until the threshold is agreed and the relevant held-out benchmark evidence exists.
+
+## Exploratory PostgreSQL baseline
+
+The repository provides a deterministic synthetic benchmark runner in the PostgreSQL adapter test source set. Start the disposable Compose database, then run `./gradlew --no-daemon :postgres-adapter:fuzzySearchBenchmark`. The runner seeds 400 unique synthetic positive records and 200 prefix-sharing hard negatives from seed `20261019`, evaluates 300 single-substitution queries and 50 no-match queries, and excludes 30 warm-up searches from timed samples. It emits aggregate metrics and runtime/database metadata only; it does not print synthetic values or protected tokens. It reports retrieval recall/precision separately from final-match recall/precision, as well as index/token frequency, latency, throughput, and PostgreSQL relation sizes. These numbers are a local exploratory baseline, not a release threshold, production estimate, or security guarantee.
+
+### Recorded local run (2026-10-19)
+
+Environment: Gradle 9.8.1 wrapper, JDK 25.0.4.1, PostgreSQL 18.6 in digest-pinned Docker Compose, macOS 26.6.2 arm64, 12 reported processors, and a 9 GiB JVM maximum heap. The corpus contains 600 records (400 positives and 200 prefix-sharing hard negatives); 300 held-out single-substitution queries and 50 no-match queries; candidate limit 100; final similarity threshold 0.80. One single-threaded local run produced:
+
+| Measure | Observed result |
+| --- | ---: |
+| Candidate recall | 1.000 (300/300) |
+| Candidate precision | 0.010 (300/30,000 candidates) |
+| Candidate-limit saturation | 1.000 (300/300 queries returned the full cap) |
+| Final-match recall / precision | 1.000 / 1.000 |
+| No-match false-positive rate | 0/50 |
+| Candidate retrieval latency, p50 / p95 | 9.403 / 12.287 ms |
+| Full search latency, p50 / p95 | 10.207 / 14.178 ms |
+| Full search throughput | 94.73 queries/s |
+| Indexing throughput | 99.81 records/s |
+| Token postings / unique protected tokens | 20,256 / 6,859 |
+| Maximum / mean protected-token frequency | 40 / 2.953 |
+| Logical protected-token bytes / ciphertext bytes | 788,784 / 30,000 |
+| Logical index-to-ciphertext byte ratio | 26.293x |
+| PostgreSQL token / record relation sizes | 6,848,512 / 253,952 bytes |
+
+Interpretation: the protected-token OR retrieval included every relevant record in this fixture, but returned the maximum 100 candidates on every typo query, so candidate precision was only 1%. Final Levenshtein verification removed the observed hard negatives for this corpus and threshold. The saturation and low retrieval precision are important limitations, not evidence that 100 is a generally safe cap: unseen relevant candidates may be truncated, and the fixture is a narrow ASCII workload. Further strategy/overlap tuning should be evaluated on a new held-out corpus before setting any candidate or accuracy target. The latency and throughput are local, single-run measurements without a production hardware profile.

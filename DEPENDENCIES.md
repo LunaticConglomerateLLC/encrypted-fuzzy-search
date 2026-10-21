@@ -8,6 +8,10 @@ Dependencies using Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, or EP
 
 Do not add proprietary, commercial-only, source-available, or non-commercial dependencies. Licenses outside the allowlist, including copyleft licenses, require explicit review before adoption. Apply the same review to transitive dependencies.
 
+## Current module dependencies
+
+- `postgres-adapter`: PostgreSQL JDBC driver (`org.postgresql:postgresql:42.7.13`) at runtime to implement the JDBC adapter. The driver is licensed under BSD-2-Clause; tests use only the standard JDBC API and the same runtime driver.
+
 ## Review expectations
 
 - Record the purpose of each new runtime dependency and prefer the JDK or existing modules when practical.
