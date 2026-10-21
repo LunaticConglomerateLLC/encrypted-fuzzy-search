@@ -10,7 +10,7 @@ public final class TransliterationProfile {
   public static final String SIMPLIFIED_CHINESE_LANGUAGE_TAG = "zh-Hans";
 
   /** Stable transform ID; change this when ICU4J data or transform behavior changes. */
-  public static final String SIMPLIFIED_CHINESE_TRANSFORM_ID = "efs-translit-zh-Hans-icu4j-78.3-v1";
+  public static final String SIMPLIFIED_CHINESE_TRANSFORM_ID = "efs-translit-zh-Hans-icu4j-78.3-v2";
 
   private static final TransliterationProfile SIMPLIFIED_CHINESE =
       new TransliterationProfile(

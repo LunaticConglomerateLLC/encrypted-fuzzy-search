@@ -23,7 +23,7 @@ public class Icu4jTransliterationProviderTest {
   public void preservesOriginalAndReturnsDistinctRomanizedForms() {
     List<TransliterationVariant> variants = provider.variants("你好", simplifiedChinese);
 
-    assertEquals(variants.size(), 3);
+    assertEquals(variants.size(), Icu4jTransliterationProvider.MAX_VARIANT_COUNT);
     assertEquals(variants.get(0).kind(), TransliterationVariant.Kind.ORIGINAL);
     assertEquals(variants.get(0).transformId(), CanonicalTextNormalizer.TRANSFORM_ID);
     assertEquals(variants.get(0).value(), "你好");
@@ -33,6 +33,8 @@ public class Icu4jTransliterationProviderTest {
     assertEquals(variants.get(2).kind(), TransliterationVariant.Kind.TONE_FOLDED_LATIN);
     assertEquals(variants.get(2).transformId(), simplifiedChinese.transformId());
     assertEquals(variants.get(2).value(), "ni hao");
+    assertEquals(variants.get(3).kind(), TransliterationVariant.Kind.COMPACT_LATIN);
+    assertEquals(variants.get(3).value(), "nihao");
     assertThrows(UnsupportedOperationException.class, () -> variants.add(variants.get(0)));
   }
 
@@ -40,20 +42,23 @@ public class Icu4jTransliterationProviderTest {
   public void foldsToneMarksFromUserSuppliedPinyinQuery() {
     List<TransliterationVariant> variants = provider.variants("nǐ hǎo", simplifiedChinese);
 
-    assertEquals(variants.size(), 2);
+    assertEquals(variants.size(), 3);
     assertEquals(variants.get(0).kind(), TransliterationVariant.Kind.ORIGINAL);
     assertEquals(variants.get(0).value(), "nǐ hǎo");
     assertEquals(variants.get(1).kind(), TransliterationVariant.Kind.TONE_FOLDED_LATIN);
     assertEquals(variants.get(1).value(), "ni hao");
+    assertEquals(variants.get(2).kind(), TransliterationVariant.Kind.COMPACT_LATIN);
+    assertEquals(variants.get(2).value(), "nihao");
   }
 
   @Test
   public void deduplicatesUnchangedLatinFormsAndKeepsOriginalFirst() {
     List<TransliterationVariant> variants = provider.variants("ni hao", simplifiedChinese);
 
-    assertEquals(variants.size(), 1);
+    assertEquals(variants.size(), 2);
     assertEquals(variants.get(0).kind(), TransliterationVariant.Kind.ORIGINAL);
     assertEquals(variants.get(0).value(), "ni hao");
+    assertEquals(variants.get(1).value(), "nihao");
   }
 
   @Test

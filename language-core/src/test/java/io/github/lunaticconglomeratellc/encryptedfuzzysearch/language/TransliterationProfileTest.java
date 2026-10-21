@@ -13,7 +13,7 @@ public class TransliterationProfileTest {
     TransliterationProfile profile = TransliterationProfile.forLanguageTag("zh-hans");
 
     assertEquals(profile.languageTag(), "zh-Hans");
-    assertEquals(profile.transformId(), "efs-translit-zh-Hans-icu4j-78.3-v1");
+    assertEquals(profile.transformId(), "efs-translit-zh-Hans-icu4j-78.3-v2");
     assertSame(
         TransliterationProfile.forLanguageTag("zh-Hans"),
         TransliterationProfile.forLanguageTag("zh-hans"));

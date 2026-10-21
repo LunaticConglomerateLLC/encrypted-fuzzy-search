@@ -3,6 +3,7 @@ package io.github.lunaticconglomeratellc.encryptedfuzzysearch.search;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertThrows;
 import static org.testng.Assert.assertTrue;
+import static org.testng.Assert.expectThrows;
 
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.AuthenticatedFieldCipher;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ExactBlindIndexer;
@@ -10,6 +11,7 @@ import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.InvalidCiphe
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.NgramBlindIndexer;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ScopedKeyDeriver;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.CanonicalTextNormalizer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.TransliterationProfile;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -65,6 +67,90 @@ public class EncryptedFuzzySearchServiceTest {
 
     assertEquals(results.size(), 1);
     assertEquals(results.get(0).value(), "Caf\u00e9");
+  }
+
+  @Test
+  public void indexesAndSearchesChineseAndToneFoldedLatinWithTheSameProfile() throws Exception {
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), new InMemoryRepository());
+    TransliterationProfile chinese =
+        TransliterationProfile.forLanguageTag(
+            TransliterationProfile.SIMPLIFIED_CHINESE_LANGUAGE_TAG);
+    service.indexValue("tenant-a", "name", "greeting", "key-v1", "你好", chinese);
+
+    List<FuzzySearchResult> hanQuery =
+        service.search("tenant-a", "name", "key-v1", "你好", 10, 1.0, chinese);
+    List<FuzzySearchResult> pinyinQuery =
+        service.search("tenant-a", "name", "key-v1", "ni hao", 10, 1.0, chinese);
+    List<FuzzySearchResult> pinyinWithTones =
+        service.search("tenant-a", "name", "key-v1", "nǐ hǎo", 10, 1.0, chinese);
+    List<FuzzySearchResult> compactPinyin =
+        service.search("tenant-a", "name", "key-v1", "nihao", 10, 1.0, chinese);
+
+    assertEquals(hanQuery.size(), 1);
+    assertEquals(pinyinQuery.size(), 1);
+    assertEquals(pinyinQuery.get(0).value(), "你好");
+    assertEquals(pinyinQuery.get(0).similarity(), 1.0);
+    assertEquals(pinyinWithTones.size(), 1);
+    assertEquals(compactPinyin.size(), 1);
+    assertTrue(service.search("tenant-a", "name", "key-v1", "ni hao", 10, 1.0).isEmpty());
+  }
+
+  @Test
+  public void multilingualTransformVersionsMustMatchForIndexAndQuery() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), repository);
+    TransliterationProfile chinese =
+        TransliterationProfile.forLanguageTag(
+            TransliterationProfile.SIMPLIFIED_CHINESE_LANGUAGE_TAG);
+    service.indexValue("tenant-a", "name", "greeting", "key-v1", "你好", chinese);
+    repository.overrideTransform("older-profile-version");
+
+    assertThrows(
+        GeneralSecurityException.class,
+        () -> service.search("tenant-a", "name", "key-v1", "你好", 10, 0.0, chinese));
+  }
+
+  @Test
+  public void multilingualEntryPointsRequireAnExplicitProfile() {
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), new InMemoryRepository());
+
+    assertThrows(
+        NullPointerException.class,
+        () -> service.indexValue("tenant-a", "name", "record", "key-v1", "你好", null));
+    assertThrows(
+        NullPointerException.class,
+        () -> service.search("tenant-a", "name", "key-v1", "你好", 10, 0.0, null));
+  }
+
+  @Test
+  public void rejectsMultilingualIndexOrQueryThatExceedsAggregateTokenLimit() {
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), new InMemoryRepository());
+    TransliterationProfile chinese =
+        TransliterationProfile.forLanguageTag(
+            TransliterationProfile.SIMPLIFIED_CHINESE_LANGUAGE_TAG);
+    String highEntropyHanText = sequentialHanText(800);
+
+    IllegalArgumentException indexFailure =
+        expectThrows(
+            IllegalArgumentException.class,
+            () ->
+                service.indexValue(
+                    "tenant-a", "name", "too-large", "key-v1", highEntropyHanText, chinese));
+    assertTrue(indexFailure.getMessage().contains("multilingual variants exceed maximum"));
+    IllegalArgumentException queryFailure =
+        expectThrows(
+            IllegalArgumentException.class,
+            () ->
+                service.search("tenant-a", "name", "key-v1", highEntropyHanText, 10, 0.0, chinese));
+    assertTrue(queryFailure.getMessage().contains("multilingual variants exceed maximum"));
+  }
+
+  private static String sequentialHanText(int codePointCount) {
+    StringBuilder text = new StringBuilder(codePointCount);
+    for (int offset = 0; offset < codePointCount; offset++) {
+      text.appendCodePoint(0x4e00 + offset);
+    }
+    return text.toString();
   }
 
   @Test
@@ -274,6 +360,10 @@ public class EncryptedFuzzySearchServiceTest {
 
     private void overrideCandidateIdentity(String recordId) {
       recordIdOverride = recordId;
+    }
+
+    private void overrideTransform(String transformVersion) {
+      transformOverride = transformVersion;
     }
   }
 }

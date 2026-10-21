@@ -11,7 +11,9 @@ public record TransliterationVariant(Kind kind, String transformId, String value
     /** The output of the configured script transliterator. */
     LATIN,
     /** A Latin transliteration with pinyin tone marks folded for the Chinese profile. */
-    TONE_FOLDED_LATIN
+    TONE_FOLDED_LATIN,
+    /** Tone-folded Latin text with Unicode whitespace removed for compact query matching. */
+    COMPACT_LATIN
   }
 
   public TransliterationVariant {

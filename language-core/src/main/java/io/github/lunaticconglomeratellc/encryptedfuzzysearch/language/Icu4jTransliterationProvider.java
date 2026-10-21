@@ -24,8 +24,8 @@ public final class Icu4jTransliterationProvider {
   /** Maximum input and generated-form length, in Unicode code points. */
   public static final int MAX_CODE_POINTS_PER_FORM = 4_096;
 
-  /** Maximum forms produced by this profile: original, transliterated, and tone-folded. */
-  public static final int MAX_VARIANT_COUNT = 3;
+  /** Maximum forms produced by this profile: original, transliterated, tone-folded, and compact. */
+  public static final int MAX_VARIANT_COUNT = 4;
 
   private final CanonicalTextNormalizer canonicalTextNormalizer;
 
@@ -42,7 +42,7 @@ public final class Icu4jTransliterationProvider {
    * Produces the original form and distinct transliterated forms for an explicit profile.
    * Transliteration is opt-in: callers should invoke this provider only for fields configured with
    * a supported profile. The original form is emitted first, followed by any distinct Latin
-   * transliteration and tone-folded form.
+   * transliteration, tone-folded form, and compact tone-folded form.
    *
    * @param text input text
    * @param profile caller-selected profile
@@ -80,6 +80,14 @@ public final class Icu4jTransliterationProvider {
         TransliterationVariant.Kind.TONE_FOLDED_LATIN,
         profile.transformId(),
         toneFolded);
+    String compact = removeWhitespace(toneFolded);
+    validateSize(compact, "compact output");
+    addDistinctVariant(
+        variants,
+        emittedValues,
+        TransliterationVariant.Kind.COMPACT_LATIN,
+        profile.transformId(),
+        compact);
     return List.copyOf(variants);
   }
 
@@ -116,5 +124,14 @@ public final class Icu4jTransliterationProvider {
     return type == UCharacterCategory.NON_SPACING_MARK
         || type == UCharacterCategory.COMBINING_SPACING_MARK
         || type == UCharacterCategory.ENCLOSING_MARK;
+  }
+
+  private static String removeWhitespace(String value) {
+    StringBuilder compact = new StringBuilder(value.length());
+    value
+        .codePoints()
+        .filter(codePoint -> !UCharacter.isUWhiteSpace(codePoint))
+        .forEach(compact::appendCodePoint);
+    return compact.toString();
   }
 }
