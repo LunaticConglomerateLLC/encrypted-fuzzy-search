@@ -7,5 +7,9 @@ public enum IndexLeakage {
   /** Token repetition can reveal value or token frequency. */
   FREQUENCY,
   /** A query may reveal which records share one or more tokens. */
-  TOKEN_OVERLAP
+  TOKEN_OVERLAP,
+  /** Distinct canonical values may map to the same token before cryptographic protection. */
+  STRATEGY_COLLISION,
+  /** Shared prefix tokens reveal that values have a common leading substring. */
+  PREFIX_RELATION
 }
