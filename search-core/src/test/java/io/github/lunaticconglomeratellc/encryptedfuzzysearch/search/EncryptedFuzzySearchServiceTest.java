@@ -12,6 +12,10 @@ import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.NgramBlindIn
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ScopedKeyDeriver;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.CanonicalTextNormalizer;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.TransliterationProfile;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -120,6 +124,71 @@ public class EncryptedFuzzySearchServiceTest {
     assertThrows(
         NullPointerException.class,
         () -> service.search("tenant-a", "name", "key-v1", "你好", 10, 0.0, null));
+  }
+
+  @Test
+  public void multilingualSearchCorpusIncludesPositiveAndNegativeCrossScriptCases()
+      throws Exception {
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), new InMemoryRepository());
+    TransliterationProfile chinese =
+        TransliterationProfile.forLanguageTag(
+            TransliterationProfile.SIMPLIFIED_CHINESE_LANGUAGE_TAG);
+    service.indexValue("tenant-a", "name", "greeting", "key-v1", "你好", chinese);
+
+    try (InputStream stream =
+        getClass().getResourceAsStream("/multilingual-cross-script-search-corpus.tsv")) {
+      assertTrue(stream != null, "cross-script search corpus resource must exist");
+      try (BufferedReader reader =
+          new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+        for (String line = reader.readLine(); line != null; line = reader.readLine()) {
+          if (line.isBlank() || line.startsWith("#")) {
+            continue;
+          }
+          String[] fields = line.split("\\t", -1);
+          assertEquals(fields.length, 4, "each row has outcome, tag, query, and expected record");
+          switch (fields[0]) {
+            case "positive" -> {
+              TransliterationProfile profile = TransliterationProfile.forLanguageTag(fields[1]);
+              List<FuzzySearchResult> results =
+                  service.search("tenant-a", "name", "key-v1", fields[2], 10, 1.0, profile);
+              assertEquals(results.size(), 1);
+              assertEquals(results.getFirst().recordId(), fields[3]);
+            }
+            case "negative" -> {
+              TransliterationProfile profile = TransliterationProfile.forLanguageTag(fields[1]);
+              assertEquals(
+                  service.search("tenant-a", "name", "key-v1", fields[2], 10, 0.0, profile),
+                  List.of(),
+                  "unexpected Chinese candidate for cross-script query: " + fields[2]);
+            }
+            case "unsupported" ->
+                assertThrows(
+                    IllegalArgumentException.class,
+                    () -> TransliterationProfile.forLanguageTag(fields[1]));
+            default ->
+                throw new AssertionError("unknown cross-script corpus outcome: " + fields[0]);
+          }
+        }
+      }
+    }
+  }
+
+  @Test
+  public void transliterationHomophonesCanReturnDistinctChineseWords() throws Exception {
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), new InMemoryRepository());
+    TransliterationProfile chinese =
+        TransliterationProfile.forLanguageTag(
+            TransliterationProfile.SIMPLIFIED_CHINESE_LANGUAGE_TAG);
+    service.indexValue("tenant-a", "name", "particle", "key-v1", "吗", chinese);
+    service.indexValue("tenant-a", "name", "mother", "key-v1", "妈", chinese);
+
+    List<FuzzySearchResult> matches =
+        service.search("tenant-a", "name", "key-v1", "ma", 10, 1.0, chinese);
+
+    assertEquals(matches.size(), 2);
+    assertTrue(matches.stream().anyMatch(result -> result.recordId().equals("particle")));
+    assertTrue(matches.stream().anyMatch(result -> result.recordId().equals("mother")));
+    assertTrue(matches.stream().allMatch(result -> result.similarity() == 1.0));
   }
 
   @Test

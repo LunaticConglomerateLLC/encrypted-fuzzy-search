@@ -2,7 +2,7 @@
 
 Encrypted Fuzzy Search is an early-stage Java and Kotlin library project for searching encrypted application data. The goal is to support exact and approximate candidate retrieval without persisting plaintext search terms, while making the security and accuracy trade-offs visible to application teams.
 
-The project has released v0.1.0, its cryptographic foundation. The v0.2 milestone is developing protected fuzzy indexes, PostgreSQL-backed candidate retrieval, and functional verification. APIs remain early-stage and may change.
+The project has released v0.1.0, its cryptographic foundation. Current development adds protected fuzzy search and opt-in multilingual variants, initially for Simplified Chinese (`zh-Hans`) using transliteration rather than translation. APIs remain early-stage and may change; see [ARCHITECTURE.md](ARCHITECTURE.md) for supported profiles, limits, leakage, and reindexing requirements.
 
 ## What the library is intended to provide
 
