@@ -5,6 +5,7 @@ import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ExactBlindIn
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ScopedKeyDeriver;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.CanonicalTextNormalizer;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.Icu4jTransliterationProvider;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.LanguageVariantProvider;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.TransliterationProfile;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.TransliterationVariant;
 import java.nio.ByteBuffer;
@@ -18,6 +19,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +52,7 @@ public final class EncryptedFuzzySearchService {
   private final List<ProtectedIndexStrategy> protectedIndexStrategies;
   private final SearchPolicy searchPolicy;
   private final SearchPlanner searchPlanner;
+  private final Map<String, LanguageVariantProvider> languageProviders;
   private final TokenIndexRepository repository;
   private final CodePointLevenshteinScorer scorer;
   private final Icu4jTransliterationProvider transliterationProvider;
@@ -97,6 +100,25 @@ public final class EncryptedFuzzySearchService {
       List<? extends ProtectedIndexStrategy> protectedIndexStrategies,
       TokenIndexRepository repository,
       SearchPolicy searchPolicy) {
+    this(
+        keyDeriver,
+        fieldCipher,
+        textNormalizer,
+        protectedIndexStrategies,
+        repository,
+        searchPolicy,
+        List.of(new Icu4jTransliterationProvider()));
+  }
+
+  /** Creates the service with explicit strategy/leakage policy and language providers. */
+  public EncryptedFuzzySearchService(
+      ScopedKeyDeriver keyDeriver,
+      AuthenticatedFieldCipher fieldCipher,
+      CanonicalTextNormalizer textNormalizer,
+      List<? extends ProtectedIndexStrategy> protectedIndexStrategies,
+      TokenIndexRepository repository,
+      SearchPolicy searchPolicy,
+      List<? extends LanguageVariantProvider> languageProviders) {
     this.keyDeriver = Objects.requireNonNull(keyDeriver, "keyDeriver");
     this.fieldCipher = Objects.requireNonNull(fieldCipher, "fieldCipher");
     this.textNormalizer = Objects.requireNonNull(textNormalizer, "textNormalizer");
@@ -104,6 +126,7 @@ public final class EncryptedFuzzySearchService {
     this.searchPolicy = Objects.requireNonNull(searchPolicy, "searchPolicy");
     this.protectedIndexStrategies.forEach(this.searchPolicy::requireAllowed);
     this.searchPlanner = new SearchPlanner();
+    this.languageProviders = validateLanguageProviders(languageProviders);
     this.repository = Objects.requireNonNull(repository, "repository");
     this.scorer = new CodePointLevenshteinScorer();
     this.transliterationProvider = new Icu4jTransliterationProvider();
@@ -114,6 +137,31 @@ public final class EncryptedFuzzySearchService {
       String tenantId, String fieldId, String recordId, String keyId, String value)
       throws GeneralSecurityException, SQLException {
     indexValueWithProfile(tenantId, fieldId, recordId, keyId, value, null);
+  }
+
+  /** Indexes a value under an explicitly selected provider and caller-supplied language tag. */
+  public void indexValueWithLanguageProvider(
+      String tenantId,
+      String fieldId,
+      String recordId,
+      String keyId,
+      String value,
+      LanguageProviderSelection selection)
+      throws GeneralSecurityException, SQLException {
+    Objects.requireNonNull(selection, "selection");
+    LanguageVariantProvider provider = requireAllowedLanguageProvider(selection.providerId());
+    String providerVersion = requireTransformId(provider.transformId(selection.languageTag()));
+    String transformId = qualifiedTransformId(selection.providerId(), providerVersion);
+    indexValueWithProvider(
+        tenantId,
+        fieldId,
+        recordId,
+        keyId,
+        value,
+        selection,
+        provider,
+        providerVersion,
+        transformId);
   }
 
   /** Indexes a value using an explicitly selected, immutable multilingual transform profile. */
@@ -171,6 +219,44 @@ public final class EncryptedFuzzySearchService {
     }
   }
 
+  private void indexValueWithProvider(
+      String tenantId,
+      String fieldId,
+      String recordId,
+      String keyId,
+      String value,
+      LanguageProviderSelection selection,
+      LanguageVariantProvider provider,
+      String providerVersion,
+      String transformId)
+      throws GeneralSecurityException, SQLException {
+    requireIdentifier(tenantId, "tenantId");
+    requireIdentifier(fieldId, "fieldId");
+    requireIdentifier(recordId, "recordId");
+    requireIdentifier(keyId, "keyId");
+    String canonicalValue = textNormalizer.normalize(value);
+    byte[] plaintext = canonicalValue.getBytes(StandardCharsets.UTF_8);
+    byte[] associatedData = associatedData(tenantId, fieldId, recordId, keyId);
+    byte[] ciphertext = null;
+    try {
+      SecretKey indexKey = keyDeriver.deriveIndexKey(keyId, tenantId, fieldId);
+      List<ProtectedToken> tokens =
+          createProviderTokens(
+              indexKey, canonicalValue, selection, provider, providerVersion, transformId);
+      SecretKey encryptionKey = keyDeriver.deriveEncryptionKey(keyId, tenantId, fieldId);
+      ciphertext = fieldCipher.encrypt(encryptionKey, plaintext, associatedData);
+      repository.upsert(
+          new EncryptedSearchDocument(
+              tenantId, fieldId, recordId, keyId, transformId, ciphertext, tokens));
+    } finally {
+      Arrays.fill(plaintext, (byte) 0);
+      Arrays.fill(associatedData, (byte) 0);
+      if (ciphertext != null) {
+        Arrays.fill(ciphertext, (byte) 0);
+      }
+    }
+  }
+
   /**
    * Retrieves a bounded candidate set, decrypts only those candidates, and ranks verified matches.
    * Candidate limiting may reduce recall and is not a completeness guarantee.
@@ -201,11 +287,36 @@ public final class EncryptedFuzzySearchService {
     Objects.requireNonNull(request, "request");
     SearchPlan plan =
         searchPlanner.plan(request.accuracyContract(), protectedIndexStrategies, searchPolicy);
+    SearchExpansionOptions expansions = request.expansions();
+    if (!expansions.aliases().isEmpty() && !searchPolicy.aliasesAllowed()) {
+      throw new IllegalArgumentException("search policy does not allow known aliases");
+    }
+    LanguageProviderSelection languageSelection = expansions.languageProvider().orElse(null);
+    LanguageVariantProvider provider =
+        languageSelection == null
+            ? null
+            : requireAllowedLanguageProvider(languageSelection.providerId());
+    String providerVersion =
+        provider == null
+            ? null
+            : requireTransformId(provider.transformId(languageSelection.languageTag()));
+    String transformId =
+        provider == null
+            ? null
+            : qualifiedTransformId(languageSelection.providerId(), providerVersion);
     String canonicalQuery = textNormalizer.normalize(request.query());
+    List<String> queryForms =
+        expandQueryForms(canonicalQuery, expansions, provider, languageSelection, providerVersion);
+    List<ExpansionProvenance> expansionProvenance =
+        expansionProvenance(expansions, languageSelection, providerVersion);
     SecretKey indexKey =
         keyDeriver.deriveIndexKey(request.keyId(), request.tenantId(), request.fieldId());
-    List<ProtectedToken> queryTokens =
-        createStrategyTokens(indexKey, canonicalQuery, null, plan.strategies());
+    LinkedHashSet<ProtectedToken> queryTokenSet = new LinkedHashSet<>();
+    for (String queryForm : queryForms) {
+      addMultilingualTokens(
+          queryTokenSet, createStrategyTokens(indexKey, queryForm, transformId, plan.strategies()));
+    }
+    List<ProtectedToken> queryTokens = List.copyOf(queryTokenSet);
     List<SearchCandidate> candidates =
         repository.findCandidates(
             request.tenantId(),
@@ -219,7 +330,9 @@ public final class EncryptedFuzzySearchService {
 
     List<FuzzySearchResult> matches = new ArrayList<>();
     for (SearchCandidate candidate : candidatesToVerify) {
-      if (!CanonicalTextNormalizer.TRANSFORM_ID.equals(candidate.transformVersion())) {
+      String expectedTransform =
+          transformId == null ? CanonicalTextNormalizer.TRANSFORM_ID : transformId;
+      if (!expectedTransform.equals(candidate.transformVersion())) {
         throw new GeneralSecurityException("candidate uses an unsupported text transform");
       }
       byte[] associatedData =
@@ -233,12 +346,22 @@ public final class EncryptedFuzzySearchService {
         plaintext = fieldCipher.decrypt(encryptionKey, candidate.ciphertext(), associatedData);
         String value = decodeUtf8(plaintext);
         String canonicalValue = textNormalizer.normalize(value);
+        List<String> candidateForms =
+            provider == null
+                ? List.of(canonicalValue)
+                : languageForms(canonicalValue, provider, languageSelection, providerVersion);
+        int minimumDistance = Integer.MAX_VALUE;
+        double similarity = 0.0;
+        for (String queryForm : queryForms) {
+          for (String candidateForm : candidateForms) {
+            minimumDistance = Math.min(minimumDistance, scorer.distance(queryForm, candidateForm));
+            similarity = Math.max(similarity, scorer.score(queryForm, candidateForm));
+          }
+        }
         if (plan.accuracyContract().mode() == SearchMode.BOUNDED_FUZZY
-            && scorer.distance(canonicalQuery, canonicalValue)
-                > plan.accuracyContract().maximumEditDistance()) {
+            && minimumDistance > plan.accuracyContract().maximumEditDistance()) {
           continue;
         }
-        double similarity = scorer.score(canonicalQuery, canonicalValue);
         if (similarity >= request.minimumSimilarity()) {
           matches.add(
               new FuzzySearchResult(
@@ -258,7 +381,8 @@ public final class EncryptedFuzzySearchService {
         plan.candidateCompleteness(),
         candidateLimitExceeded,
         candidatesToVerify.size(),
-        plan.strategyIds());
+        plan.strategyIds(),
+        expansionProvenance);
   }
 
   /** Searches a field whose values were indexed with the same explicit transform profile. */
@@ -470,6 +594,149 @@ public final class EncryptedFuzzySearchService {
       }
     }
     return List.copyOf(tokens);
+  }
+
+  private List<ProtectedToken> createProviderTokens(
+      SecretKey indexKey,
+      String canonicalText,
+      LanguageProviderSelection selection,
+      LanguageVariantProvider provider,
+      String providerVersion,
+      String transformId)
+      throws GeneralSecurityException {
+    LinkedHashSet<ProtectedToken> tokens = new LinkedHashSet<>();
+    for (String form : languageForms(canonicalText, provider, selection, providerVersion)) {
+      addMultilingualTokens(
+          tokens, createStrategyTokens(indexKey, form, transformId, protectedIndexStrategies));
+    }
+    return List.copyOf(tokens);
+  }
+
+  private List<String> expandQueryForms(
+      String canonicalQuery,
+      SearchExpansionOptions expansions,
+      LanguageVariantProvider provider,
+      LanguageProviderSelection selection,
+      String providerVersion) {
+    LinkedHashSet<String> forms = new LinkedHashSet<>();
+    addForms(forms, canonicalQuery, provider, selection, providerVersion);
+    for (SearchAlias alias : expansions.aliases()) {
+      String canonicalAlias = textNormalizer.normalize(alias.value());
+      addForms(forms, canonicalAlias, provider, selection, providerVersion);
+    }
+    int maximumForms =
+        (expansions.aliases().size() + 1)
+            * (provider == null ? 1 : SearchExpansionOptions.MAX_LANGUAGE_VARIANT_COUNT);
+    if (forms.size() > maximumForms) {
+      throw new IllegalArgumentException("query expansions exceed the configured form bound");
+    }
+    return List.copyOf(forms);
+  }
+
+  private void addForms(
+      LinkedHashSet<String> forms,
+      String canonicalText,
+      LanguageVariantProvider provider,
+      LanguageProviderSelection selection,
+      String providerVersion) {
+    if (provider == null) {
+      forms.add(canonicalText);
+    } else {
+      forms.addAll(languageForms(canonicalText, provider, selection, providerVersion));
+    }
+    if (forms.size()
+        > (SearchExpansionOptions.MAX_ALIAS_COUNT + 1)
+            * SearchExpansionOptions.MAX_LANGUAGE_VARIANT_COUNT) {
+      throw new IllegalArgumentException("query expansions exceed the configured form bound");
+    }
+  }
+
+  private List<String> languageForms(
+      String canonicalText,
+      LanguageVariantProvider provider,
+      LanguageProviderSelection selection,
+      String providerVersion) {
+    List<TransliterationVariant> variants =
+        List.copyOf(provider.variantsForLanguage(canonicalText, selection.languageTag()));
+    if (variants.isEmpty() || variants.size() > SearchExpansionOptions.MAX_LANGUAGE_VARIANT_COUNT) {
+      throw new IllegalArgumentException("language provider returned an invalid number of forms");
+    }
+    LinkedHashSet<String> forms = new LinkedHashSet<>();
+    boolean retainedOriginal = false;
+    for (TransliterationVariant variant : variants) {
+      Objects.requireNonNull(variant, "language variant");
+      if (!CanonicalTextNormalizer.TRANSFORM_ID.equals(variant.transformId())
+          && !providerVersion.equals(variant.transformId())) {
+        throw new IllegalArgumentException("language provider returned an unexpected transform ID");
+      }
+      String normalizedForm = textNormalizer.normalize(variant.value());
+      if (variant.kind() == TransliterationVariant.Kind.ORIGINAL) {
+        retainedOriginal = normalizedForm.equals(canonicalText);
+      }
+      forms.add(normalizedForm);
+    }
+    if (!retainedOriginal) {
+      throw new IllegalArgumentException("language provider must retain the original text");
+    }
+    return List.copyOf(forms);
+  }
+
+  private static List<ExpansionProvenance> expansionProvenance(
+      SearchExpansionOptions expansions, LanguageProviderSelection selection, String transformId) {
+    List<ExpansionProvenance> provenance = new ArrayList<>();
+    for (SearchAlias alias : expansions.aliases()) {
+      provenance.add(ExpansionProvenance.alias(alias.origin(), alias.version()));
+    }
+    if (selection != null) {
+      provenance.add(
+          ExpansionProvenance.languageProvider(
+              selection.providerId(), transformId, selection.languageTag()));
+    }
+    return List.copyOf(provenance);
+  }
+
+  private LanguageVariantProvider requireAllowedLanguageProvider(String providerId) {
+    if (!searchPolicy.allowsLanguageProvider(providerId)) {
+      throw new IllegalArgumentException(
+          "search policy does not allow language provider " + providerId);
+    }
+    LanguageVariantProvider provider = languageProviders.get(providerId);
+    if (provider == null) {
+      throw new IllegalArgumentException("language provider is not configured: " + providerId);
+    }
+    return provider;
+  }
+
+  private static String requireTransformId(String transformId) {
+    Objects.requireNonNull(transformId, "transformId");
+    if (transformId.isBlank() || transformId.length() > 256) {
+      throw new IllegalArgumentException("transform ID must contain 1 to 256 characters");
+    }
+    return transformId;
+  }
+
+  private String qualifiedTransformId(String providerId, String providerVersion) {
+    String transformId = requireTransformId(providerId + "-" + providerVersion);
+    for (ProtectedIndexStrategy strategy : protectedIndexStrategies) {
+      strategy.strategyId(transformId);
+    }
+    return transformId;
+  }
+
+  private static Map<String, LanguageVariantProvider> validateLanguageProviders(
+      List<? extends LanguageVariantProvider> providers) {
+    Objects.requireNonNull(providers, "languageProviders");
+    Map<String, LanguageVariantProvider> byId = new LinkedHashMap<>();
+    for (LanguageVariantProvider provider : List.copyOf(providers)) {
+      Objects.requireNonNull(provider, "language provider");
+      String providerId = Objects.requireNonNull(provider.providerId(), "providerId");
+      if (providerId.isBlank()
+          || providerId.length() > 64
+          || byId.putIfAbsent(providerId, provider) != null) {
+        throw new IllegalArgumentException("language provider IDs must be valid and unique");
+      }
+    }
+    return Map.copyOf(byId);
   }
 
   private static List<ProtectedIndexStrategy> legacyStrategies(

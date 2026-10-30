@@ -10,18 +10,37 @@ public record SearchOutcome(
     CandidateCompleteness candidateCompleteness,
     boolean candidateLimitExceeded,
     int candidatesVerified,
-    List<String> strategyIds) {
+    List<String> strategyIds,
+    List<ExpansionProvenance> expansions) {
   public SearchOutcome {
     matches = List.copyOf(Objects.requireNonNull(matches, "matches"));
     Objects.requireNonNull(accuracyContract, "accuracyContract");
     Objects.requireNonNull(candidateCompleteness, "candidateCompleteness");
     strategyIds = List.copyOf(Objects.requireNonNull(strategyIds, "strategyIds"));
+    expansions = List.copyOf(Objects.requireNonNull(expansions, "expansions"));
     if (candidatesVerified < 0) {
       throw new IllegalArgumentException("candidatesVerified must not be negative");
     }
     if (strategyIds.isEmpty()) {
       throw new IllegalArgumentException("strategyIds must not be empty");
     }
+  }
+
+  public SearchOutcome(
+      List<FuzzySearchResult> matches,
+      SearchAccuracyContract accuracyContract,
+      CandidateCompleteness candidateCompleteness,
+      boolean candidateLimitExceeded,
+      int candidatesVerified,
+      List<String> strategyIds) {
+    this(
+        matches,
+        accuracyContract,
+        candidateCompleteness,
+        candidateLimitExceeded,
+        candidatesVerified,
+        strategyIds,
+        List.of());
   }
 
   /**

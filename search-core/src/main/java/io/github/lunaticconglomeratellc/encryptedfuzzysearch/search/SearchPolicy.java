@@ -4,7 +4,11 @@ import java.util.Objects;
 import java.util.Set;
 
 /** Explicit allowlist for strategy namespaces and their declared leakage. */
-public record SearchPolicy(Set<String> allowedStrategyIds, Set<IndexLeakage> allowedLeakage) {
+public record SearchPolicy(
+    Set<String> allowedStrategyIds,
+    Set<IndexLeakage> allowedLeakage,
+    boolean aliasesAllowed,
+    Set<String> allowedLanguageProviderIds) {
   private static final Set<String> PRODUCTION_STRATEGY_IDS =
       Set.of("efs-exact", "efs-ngram-2", "efs-ngram-3");
   private static final Set<IndexLeakage> PRODUCTION_LEAKAGE =
@@ -13,25 +17,40 @@ public record SearchPolicy(Set<String> allowedStrategyIds, Set<IndexLeakage> all
   public SearchPolicy {
     Objects.requireNonNull(allowedStrategyIds, "allowedStrategyIds");
     Objects.requireNonNull(allowedLeakage, "allowedLeakage");
+    Objects.requireNonNull(allowedLanguageProviderIds, "allowedLanguageProviderIds");
     allowedStrategyIds = Set.copyOf(allowedStrategyIds);
     allowedLeakage = Set.copyOf(allowedLeakage);
+    allowedLanguageProviderIds = Set.copyOf(allowedLanguageProviderIds);
     if (allowedStrategyIds.isEmpty()) {
       throw new IllegalArgumentException("at least one strategy ID must be allowed");
     }
     if (allowedStrategyIds.stream().anyMatch(id -> id == null || id.isBlank())) {
       throw new IllegalArgumentException("allowed strategy IDs must not be blank");
     }
+    if (allowedLanguageProviderIds.stream().anyMatch(id -> id == null || id.isBlank())) {
+      throw new IllegalArgumentException("allowed language provider IDs must not be blank");
+    }
+  }
+
+  /** Creates a strategy-only policy; aliases and language providers remain disabled. */
+  public SearchPolicy(Set<String> allowedStrategyIds, Set<IndexLeakage> allowedLeakage) {
+    this(allowedStrategyIds, allowedLeakage, false, Set.of());
   }
 
   /** Owner-accepted production baseline: exact equality and bigram/trigram indexes only. */
   public static SearchPolicy productionDefault() {
-    return new SearchPolicy(PRODUCTION_STRATEGY_IDS, PRODUCTION_LEAKAGE);
+    return new SearchPolicy(PRODUCTION_STRATEGY_IDS, PRODUCTION_LEAKAGE, false, Set.of());
   }
 
   public boolean allows(ProtectedIndexStrategy strategy) {
     Objects.requireNonNull(strategy, "strategy");
     return allowedStrategyIds.contains(strategy.strategyId(null))
         && allowedLeakage.containsAll(strategy.leakageMetadata());
+  }
+
+  public boolean allowsLanguageProvider(String providerId) {
+    Objects.requireNonNull(providerId, "providerId");
+    return allowedLanguageProviderIds.contains(providerId);
   }
 
   void requireAllowed(ProtectedIndexStrategy strategy) {

@@ -62,5 +62,6 @@ The starter has no Kotlin runtime dependency; Kotlin support is exercised by a c
 
 - A host `TokenIndexRepository` bean can replace the PostgreSQL adapter, which is useful for tests or another storage implementation.
 - A host `EncryptedFuzzySearchService` bean can replace all default search composition, including protected-index strategies.
+- The default service policy permits exact and n-gram strategies only; query aliases and language-provider expansions are disabled for the accuracy-contract API. To enable them, provide a custom service bean with an explicit `SearchPolicy`, configured provider list, and a deployment-specific leakage review.
 - Without a host `MasterKeyProvider`, no `ScopedKeyDeriver` or default search service is created. There is no insecure development key fallback.
 - Database schema creation, tenant/field authorization, active key selection, and secret rotation remain host responsibilities.

@@ -10,13 +10,15 @@ public record SearchRequest(
     String query,
     SearchAccuracyContract accuracyContract,
     int candidateLimit,
-    double minimumSimilarity) {
+    double minimumSimilarity,
+    SearchExpansionOptions expansions) {
   public SearchRequest {
     requireIdentifier(tenantId, "tenantId");
     requireIdentifier(fieldId, "fieldId");
     requireIdentifier(keyId, "keyId");
     Objects.requireNonNull(query, "query");
     Objects.requireNonNull(accuracyContract, "accuracyContract");
+    Objects.requireNonNull(expansions, "expansions");
     if (candidateLimit < 1 || candidateLimit > EncryptedFuzzySearchService.MAX_CANDIDATE_LIMIT) {
       throw new IllegalArgumentException(
           "candidateLimit must be between 1 and "
@@ -29,6 +31,25 @@ public record SearchRequest(
     if (accuracyContract.mode() == SearchMode.EXACT && minimumSimilarity != 1.0) {
       throw new IllegalArgumentException("exact mode requires minimumSimilarity to equal 1.0");
     }
+  }
+
+  public SearchRequest(
+      String tenantId,
+      String fieldId,
+      String keyId,
+      String query,
+      SearchAccuracyContract accuracyContract,
+      int candidateLimit,
+      double minimumSimilarity) {
+    this(
+        tenantId,
+        fieldId,
+        keyId,
+        query,
+        accuracyContract,
+        candidateLimit,
+        minimumSimilarity,
+        SearchExpansionOptions.none());
   }
 
   public static SearchRequest exact(
@@ -70,6 +91,29 @@ public record SearchRequest(
         SearchAccuracyContract.approximate(),
         candidateLimit,
         minimumSimilarity);
+  }
+
+  /** Returns an otherwise identical request with explicit caller-supplied query expansions. */
+  public SearchRequest withExpansions(SearchExpansionOptions expansions) {
+    return new SearchRequest(
+        tenantId,
+        fieldId,
+        keyId,
+        query,
+        accuracyContract,
+        candidateLimit,
+        minimumSimilarity,
+        expansions);
+  }
+
+  /** Prevent accidental logging of plaintext query and alias text from this request. */
+  @Override
+  public String toString() {
+    return "SearchRequest[query=<redacted>, mode="
+        + accuracyContract.mode()
+        + ", candidateLimit="
+        + candidateLimit
+        + ", expansions=<redacted>]";
   }
 
   private static void requireIdentifier(String value, String name) {

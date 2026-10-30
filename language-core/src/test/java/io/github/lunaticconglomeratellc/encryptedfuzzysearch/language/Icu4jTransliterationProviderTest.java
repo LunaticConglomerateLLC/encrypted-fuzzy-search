@@ -39,6 +39,18 @@ public class Icu4jTransliterationProviderTest {
   }
 
   @Test
+  public void exposesStableProviderAndTransformSelectionWithoutLanguageGuessing() {
+    assertEquals(provider.providerId(), Icu4jTransliterationProvider.PROVIDER_ID);
+    assertEquals(
+        provider.transformId(TransliterationProfile.SIMPLIFIED_CHINESE_LANGUAGE_TAG),
+        simplifiedChinese.transformId());
+    assertEquals(
+        provider.variantsForLanguage("你好", TransliterationProfile.SIMPLIFIED_CHINESE_LANGUAGE_TAG),
+        provider.variants("你好", simplifiedChinese));
+    assertThrows(IllegalArgumentException.class, () -> provider.transformId("ja-JP"));
+  }
+
+  @Test
   public void foldsToneMarksFromUserSuppliedPinyinQuery() {
     List<TransliterationVariant> variants = provider.variants("nǐ hǎo", simplifiedChinese);
 
@@ -73,7 +85,10 @@ public class Icu4jTransliterationProviderTest {
   @Test
   public void rejectsNullsAndMalformedUtf16() {
     assertThrows(NullPointerException.class, () -> provider.variants(null, simplifiedChinese));
-    assertThrows(NullPointerException.class, () -> provider.variants("你好", null));
+    assertThrows(
+        NullPointerException.class, () -> provider.variants("你好", (TransliterationProfile) null));
+    assertThrows(
+        NullPointerException.class, () -> provider.variantsForLanguage("你好", (String) null));
     assertThrows(
         IllegalArgumentException.class, () -> provider.variants("bad\uD800", simplifiedChinese));
     assertThrows(NullPointerException.class, () -> new Icu4jTransliterationProvider(null));

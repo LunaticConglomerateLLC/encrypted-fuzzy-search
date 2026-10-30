@@ -215,6 +215,93 @@ public class EncryptedFuzzySearchServiceTest {
   }
 
   @Test
+  public void explicitKnownAliasesMatchAndReportOriginWithoutRetainingAliasText() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    SearchPolicy policy = expansionPolicy(true, Set.of());
+    EncryptedFuzzySearchService service = serviceWithPolicy(repository, policy);
+    service.indexValue("tenant-a", "name", "robert", "key-v1", "Robert");
+    SearchAlias alias = new SearchAlias("Robert", "crm-contact-alias", "2026-10");
+    SearchRequest request =
+        SearchRequest.exact("tenant-a", "name", "key-v1", "Bob", 10)
+            .withExpansions(SearchExpansionOptions.aliases(List.of(alias)));
+
+    SearchOutcome outcome = service.search(request);
+
+    assertEquals(outcome.matches().getFirst().recordId(), "robert");
+    assertEquals(
+        outcome.expansions(), List.of(ExpansionProvenance.alias("crm-contact-alias", "2026-10")));
+    assertTrue(!request.toString().contains("Bob"));
+    assertTrue(!alias.toString().contains("Robert"));
+    assertTrue(
+        repository.documents.getFirst().protectedTokens().stream()
+            .noneMatch(
+                token -> Arrays.equals("Bob".getBytes(StandardCharsets.UTF_8), token.value())));
+  }
+
+  @Test
+  public void languageProviderSelectionIsExplicitVersionedAndUsedForIndexAndSearch()
+      throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    SearchPolicy policy = expansionPolicy(false, Set.of("icu4j"));
+    EncryptedFuzzySearchService service = serviceWithPolicy(repository, policy);
+    LanguageProviderSelection selection = new LanguageProviderSelection("icu4j", "zh-Hans");
+    service.indexValueWithLanguageProvider(
+        "tenant-a", "name", "greeting", "key-v1", "你好", selection);
+    SearchRequest request =
+        SearchRequest.exact("tenant-a", "name", "key-v1", "nihao", 10)
+            .withExpansions(SearchExpansionOptions.language(selection));
+
+    SearchOutcome outcome = service.search(request);
+
+    assertEquals(outcome.matches().getFirst().recordId(), "greeting");
+    assertEquals(
+        outcome.expansions(),
+        List.of(
+            ExpansionProvenance.languageProvider(
+                "icu4j", "efs-translit-zh-Hans-icu4j-78.3-v2", "zh-Hans")));
+    assertEquals(
+        repository.documents.getFirst().transformVersion(),
+        "icu4j-efs-translit-zh-Hans-icu4j-78.3-v2");
+  }
+
+  @Test
+  public void expansionPolicyRejectsAliasesAndProvidersBeforeRepositoryAccess() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), repository);
+    SearchRequest aliasRequest =
+        SearchRequest.approximate("tenant-a", "name", "key-v1", "Bob", 10, 0.0)
+            .withExpansions(
+                SearchExpansionOptions.aliases(List.of(new SearchAlias("Robert", "crm", "v1"))));
+    SearchRequest providerRequest =
+        SearchRequest.approximate("tenant-a", "name", "key-v1", "nihao", 10, 0.0)
+            .withExpansions(
+                SearchExpansionOptions.language(new LanguageProviderSelection("icu4j", "zh-Hans")));
+
+    assertThrows(IllegalArgumentException.class, () -> service.search(aliasRequest));
+    assertThrows(IllegalArgumentException.class, () -> service.search(providerRequest));
+    assertEquals(repository.findCandidateCalls, 0);
+  }
+
+  @Test
+  public void unsupportedLanguageAndUnconfiguredProviderFailClosed() {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service =
+        serviceWithPolicy(repository, expansionPolicy(false, Set.of("icu4j")));
+    SearchRequest unsupported =
+        SearchRequest.approximate("tenant-a", "name", "key-v1", "こんにちは", 10, 0.0)
+            .withExpansions(
+                SearchExpansionOptions.language(new LanguageProviderSelection("icu4j", "ja-JP")));
+    SearchRequest missing =
+        SearchRequest.approximate("tenant-a", "name", "key-v1", "text", 10, 0.0)
+            .withExpansions(
+                SearchExpansionOptions.language(new LanguageProviderSelection("missing", "en")));
+
+    assertThrows(IllegalArgumentException.class, () -> service.search(unsupported));
+    assertThrows(IllegalArgumentException.class, () -> service.search(missing));
+    assertEquals(repository.findCandidateCalls, 0);
+  }
+
+  @Test
   public void rejectsUnapprovedStrategiesWhenConstructingServiceUnderDefaultPolicy() {
     assertThrows(
         IllegalArgumentException.class,
@@ -628,6 +715,29 @@ public class EncryptedFuzzySearchServiceTest {
     return new SearchPolicy(allowedStrategyIds, Set.of(IndexLeakage.values()));
   }
 
+  private static SearchPolicy expansionPolicy(
+      boolean aliasesAllowed, Set<String> languageProviderIds) {
+    return new SearchPolicy(
+        Set.of("efs-exact", "efs-ngram-2", "efs-ngram-3"),
+        Set.of(IndexLeakage.EQUALITY, IndexLeakage.FREQUENCY, IndexLeakage.TOKEN_OVERLAP),
+        aliasesAllowed,
+        languageProviderIds);
+  }
+
+  private static EncryptedFuzzySearchService serviceWithPolicy(
+      InMemoryRepository repository, SearchPolicy policy) {
+    return new EncryptedFuzzySearchService(
+        keyDeriver(new AtomicInteger()),
+        new AuthenticatedFieldCipher(),
+        new CanonicalTextNormalizer(),
+        List.of(
+            new ProtectedExactStrategy(new ExactBlindIndexer()),
+            new ProtectedNgramStrategy(2, new NgramBlindIndexer()),
+            new ProtectedNgramStrategy(3, new NgramBlindIndexer())),
+        repository,
+        policy);
+  }
+
   private static ScopedKeyDeriver keyDeriver(AtomicInteger keyLookups) {
     byte[] rootBytes = new byte[32];
     Arrays.fill(rootBytes, (byte) 0x37);
@@ -645,6 +755,7 @@ public class EncryptedFuzzySearchServiceTest {
     private String recordIdOverride;
     private int lastCandidateCount;
     private boolean preserveVersions;
+    private int findCandidateCalls;
 
     @Override
     public void initializeSchema() {}
@@ -664,6 +775,7 @@ public class EncryptedFuzzySearchServiceTest {
         String keyId,
         List<ProtectedToken> queryTokens,
         int limit) {
+      findCandidateCalls++;
       if (recordIdOverride != null && !documents.isEmpty()) {
         EncryptedSearchDocument document = documents.getFirst();
         return List.of(

@@ -17,7 +17,8 @@ import java.util.Set;
  * rather than enumerating every possible pronunciation. Callers should retain the original-script
  * form and use authorized final matching to resolve ambiguous candidates.
  */
-public final class Icu4jTransliterationProvider {
+public final class Icu4jTransliterationProvider implements LanguageVariantProvider {
+  public static final String PROVIDER_ID = "icu4j";
   private static final Normalizer2 ICU_NFD = Normalizer2.getNFDInstance();
   private static final Normalizer2 ICU_NFC = Normalizer2.getNFCInstance();
 
@@ -36,6 +37,21 @@ public final class Icu4jTransliterationProvider {
 
   Icu4jTransliterationProvider(CanonicalTextNormalizer canonicalTextNormalizer) {
     this.canonicalTextNormalizer = Objects.requireNonNull(canonicalTextNormalizer);
+  }
+
+  @Override
+  public String providerId() {
+    return PROVIDER_ID;
+  }
+
+  @Override
+  public String transformId(String languageTag) {
+    return TransliterationProfile.forLanguageTag(languageTag).transformId();
+  }
+
+  @Override
+  public List<TransliterationVariant> variantsForLanguage(String text, String languageTag) {
+    return variants(text, TransliterationProfile.forLanguageTag(languageTag));
   }
 
   /**
