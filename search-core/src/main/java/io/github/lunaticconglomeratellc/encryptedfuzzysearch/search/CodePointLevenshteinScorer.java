@@ -8,13 +8,20 @@ public final class CodePointLevenshteinScorer {
   public double score(String left, String right) {
     Objects.requireNonNull(left, "left");
     Objects.requireNonNull(right, "right");
-    int[] leftPoints = left.codePoints().toArray();
-    int[] rightPoints = right.codePoints().toArray();
-    int maximumLength = Math.max(leftPoints.length, rightPoints.length);
+    int maximumLength =
+        Math.max(left.codePointCount(0, left.length()), right.codePointCount(0, right.length()));
     if (maximumLength == 0) {
       return 1.0;
     }
+    return 1.0 - ((double) distance(left, right) / maximumLength);
+  }
 
+  /** Returns the case-sensitive Levenshtein distance over Unicode code points. */
+  public int distance(String left, String right) {
+    Objects.requireNonNull(left, "left");
+    Objects.requireNonNull(right, "right");
+    int[] leftPoints = left.codePoints().toArray();
+    int[] rightPoints = right.codePoints().toArray();
     int[] previous = new int[rightPoints.length + 1];
     int[] current = new int[rightPoints.length + 1];
     for (int column = 0; column <= rightPoints.length; column++) {
@@ -33,6 +40,6 @@ public final class CodePointLevenshteinScorer {
       previous = current;
       current = swap;
     }
-    return 1.0 - ((double) previous[rightPoints.length] / maximumLength);
+    return previous[rightPoints.length];
   }
 }

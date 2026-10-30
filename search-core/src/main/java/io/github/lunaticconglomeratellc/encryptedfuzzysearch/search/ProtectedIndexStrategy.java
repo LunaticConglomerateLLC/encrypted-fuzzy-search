@@ -27,6 +27,14 @@ public interface ProtectedIndexStrategy {
   /** Candidate match semantics this strategy expects the repository query to use. */
   CandidateMatchMode candidateMatchMode();
 
+  /**
+   * Candidate-generation guarantee. Implementations may claim exact or bounded guarantees only when
+   * their token-generation algorithm proves them under its documented input/expansion bounds.
+   */
+  default CandidateCompleteness candidateCompleteness() {
+    return CandidateCompleteness.bestEffort();
+  }
+
   /** Known equality/overlap leakage introduced by this strategy. */
   Set<IndexLeakage> leakageMetadata();
 
