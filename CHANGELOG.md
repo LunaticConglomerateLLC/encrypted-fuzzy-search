@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/compare/v0.3.0...v0.4.0) (2026-10-21)
+
+
+### Features
+
+* **search:** advanced search strategies ([#8](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/issues/8)) ([386af11](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/commit/386af11a640de712a991d64ad77f0bcb3ce4a75b))
+
 ## [0.3.0](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/compare/v0.2.0...v0.3.0) (2026-10-21)
 
 
