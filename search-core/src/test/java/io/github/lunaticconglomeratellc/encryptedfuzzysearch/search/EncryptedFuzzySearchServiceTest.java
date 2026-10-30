@@ -1,6 +1,7 @@
 package io.github.lunaticconglomeratellc.encryptedfuzzysearch.search;
 
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertThrows;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.expectThrows;
@@ -69,15 +70,18 @@ public class EncryptedFuzzySearchServiceTest {
   @Test
   public void deletionNeighborhoodRetrievesEditsThenVerifiesExactDistance() throws Exception {
     InMemoryRepository editRepository = new InMemoryRepository();
+    List<ProtectedIndexStrategy> deletionStrategies =
+        List.of(
+            new ProtectedExactStrategy(new ExactBlindIndexer()),
+            new ProtectedDeletionStrategy(new ExactBlindIndexer()));
     EncryptedFuzzySearchService editService =
         new EncryptedFuzzySearchService(
             keyDeriver(new AtomicInteger()),
             new AuthenticatedFieldCipher(),
             new CanonicalTextNormalizer(),
-            List.of(
-                new ProtectedExactStrategy(new ExactBlindIndexer()),
-                new ProtectedDeletionStrategy(new ExactBlindIndexer())),
-            editRepository);
+            deletionStrategies,
+            editRepository,
+            explicitPolicy(deletionStrategies));
     editService.indexValue("tenant-a", "name", "inserted", "key-v1", "cart");
     editService.indexValue("tenant-a", "name", "substituted", "key-v1", "cat");
 
@@ -95,15 +99,18 @@ public class EncryptedFuzzySearchServiceTest {
     assertEquals(substitution.getFirst().recordId(), "substituted");
 
     InMemoryRepository verificationRepository = new InMemoryRepository();
+    List<ProtectedIndexStrategy> verificationStrategies =
+        List.of(
+            new ProtectedExactStrategy(new ExactBlindIndexer()),
+            new ProtectedDeletionStrategy(new ExactBlindIndexer()));
     EncryptedFuzzySearchService verificationService =
         new EncryptedFuzzySearchService(
             keyDeriver(new AtomicInteger()),
             new AuthenticatedFieldCipher(),
             new CanonicalTextNormalizer(),
-            List.of(
-                new ProtectedExactStrategy(new ExactBlindIndexer()),
-                new ProtectedDeletionStrategy(new ExactBlindIndexer())),
-            verificationRepository);
+            verificationStrategies,
+            verificationRepository,
+            explicitPolicy(verificationStrategies));
     verificationService.indexValue("tenant-a", "name", "distant", "key-v1", "abcd");
 
     assertTrue(
@@ -114,32 +121,110 @@ public class EncryptedFuzzySearchServiceTest {
   @Test
   public void optionalPhoneticAndPrefixCandidatesAreStillSimilarityVerified() throws Exception {
     InMemoryRepository phoneticRepository = new InMemoryRepository();
+    List<ProtectedIndexStrategy> phoneticStrategies =
+        List.of(
+            new ProtectedSoundexStrategy(new ExactBlindIndexer()),
+            new ProtectedPrefixStrategy(new ExactBlindIndexer()));
     EncryptedFuzzySearchService phoneticService =
         new EncryptedFuzzySearchService(
             keyDeriver(new AtomicInteger()),
             new AuthenticatedFieldCipher(),
             new CanonicalTextNormalizer(),
-            List.of(
-                new ProtectedSoundexStrategy(new ExactBlindIndexer()),
-                new ProtectedPrefixStrategy(new ExactBlindIndexer())),
-            phoneticRepository);
+            phoneticStrategies,
+            phoneticRepository,
+            explicitPolicy(phoneticStrategies));
     phoneticService.indexValue("tenant-a", "name", "rupert", "key-v1", "Rupert");
 
     assertTrue(phoneticService.search("tenant-a", "name", "key-v1", "Robert", 10, 0.9).isEmpty());
     assertTrue(phoneticRepository.lastCandidateCount > 0);
 
     InMemoryRepository prefixRepository = new InMemoryRepository();
+    List<ProtectedIndexStrategy> prefixStrategies =
+        List.of(new ProtectedPrefixStrategy(new ExactBlindIndexer()));
     EncryptedFuzzySearchService prefixService =
         new EncryptedFuzzySearchService(
             keyDeriver(new AtomicInteger()),
             new AuthenticatedFieldCipher(),
             new CanonicalTextNormalizer(),
-            List.of(new ProtectedPrefixStrategy(new ExactBlindIndexer())),
-            prefixRepository);
+            prefixStrategies,
+            prefixRepository,
+            explicitPolicy(prefixStrategies));
     prefixService.indexValue("tenant-a", "name", "carpet", "key-v1", "carpet");
 
     assertTrue(prefixService.search("tenant-a", "name", "key-v1", "carton", 10, 0.9).isEmpty());
     assertTrue(prefixRepository.lastCandidateCount > 0);
+  }
+
+  @Test
+  public void detailedExactSearchReportsCompletenessUnlessCandidateCapIsExceeded()
+      throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), repository);
+    service.indexValue("tenant-a", "name", "alice-1", "key-v1", "Alice");
+    service.indexValue("tenant-a", "name", "alice-2", "key-v1", "Alice");
+
+    SearchOutcome outcome =
+        service.search(SearchRequest.exact("tenant-a", "name", "key-v1", "Alice", 1));
+
+    assertEquals(outcome.matches().size(), 1);
+    assertEquals(outcome.candidateCompleteness(), CandidateCompleteness.exact());
+    assertTrue(outcome.candidateLimitExceeded());
+    assertEquals(outcome.candidatesVerified(), 1);
+    assertEquals(outcome.strategyIds(), List.of("efs-exact"));
+    assertTrue(!outcome.candidateRetrievalComplete());
+  }
+
+  @Test
+  public void boundedSearchUsesProvenDeletionRadiusAndFiltersBeyondTheBound() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    List<ProtectedIndexStrategy> strategies =
+        List.of(new ProtectedDeletionStrategy(new ExactBlindIndexer(), 1, 64, 256));
+    EncryptedFuzzySearchService service =
+        new EncryptedFuzzySearchService(
+            keyDeriver(new AtomicInteger()),
+            new AuthenticatedFieldCipher(),
+            new CanonicalTextNormalizer(),
+            strategies,
+            repository,
+            explicitPolicy(strategies));
+    service.indexValue("tenant-a", "name", "one-edit", "key-v1", "a");
+    service.indexValue("tenant-a", "name", "two-edits", "key-v1", "ba");
+
+    SearchOutcome outcome =
+        service.search(SearchRequest.boundedFuzzy("tenant-a", "name", "key-v1", "ab", 1, 10, 0.0));
+
+    assertEquals(
+        outcome.matches().stream().map(FuzzySearchResult::recordId).toList(), List.of("one-edit"));
+    assertEquals(outcome.candidateCompleteness(), CandidateCompleteness.boundedEditDistance(1));
+    assertTrue(outcome.candidateRetrievalComplete());
+    assertFalse(outcome.candidateLimitExceeded());
+  }
+
+  @Test
+  public void approximateSearchAlwaysReportsBestEffortCompleteness() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), repository);
+    service.indexValue("tenant-a", "name", "alice", "key-v1", "Alice");
+
+    SearchOutcome outcome =
+        service.search(SearchRequest.approximate("tenant-a", "name", "key-v1", "Alice", 10, 0.5));
+
+    assertEquals(outcome.candidateCompleteness(), CandidateCompleteness.bestEffort());
+    assertFalse(outcome.candidateRetrievalComplete());
+    assertFalse(outcome.candidateLimitExceeded());
+  }
+
+  @Test
+  public void rejectsUnapprovedStrategiesWhenConstructingServiceUnderDefaultPolicy() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EncryptedFuzzySearchService(
+                keyDeriver(new AtomicInteger()),
+                new AuthenticatedFieldCipher(),
+                new CanonicalTextNormalizer(),
+                List.of(new ProtectedDeletionStrategy(new ExactBlindIndexer())),
+                new InMemoryRepository()));
   }
 
   @Test
@@ -533,6 +618,14 @@ public class EncryptedFuzzySearchServiceTest {
         new ProtectedNgramStrategy(2, new NgramBlindIndexer()),
         new ProtectedNgramStrategy(3, new NgramBlindIndexer()),
         repository);
+  }
+
+  private static SearchPolicy explicitPolicy(List<? extends ProtectedIndexStrategy> strategies) {
+    Set<String> allowedStrategyIds =
+        strategies.stream()
+            .map(strategy -> strategy.strategyId(null))
+            .collect(java.util.stream.Collectors.toSet());
+    return new SearchPolicy(allowedStrategyIds, Set.of(IndexLeakage.values()));
   }
 
   private static ScopedKeyDeriver keyDeriver(AtomicInteger keyLookups) {

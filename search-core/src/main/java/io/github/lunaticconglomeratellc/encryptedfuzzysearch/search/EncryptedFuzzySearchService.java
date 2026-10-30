@@ -48,6 +48,8 @@ public final class EncryptedFuzzySearchService {
   private final AuthenticatedFieldCipher fieldCipher;
   private final CanonicalTextNormalizer textNormalizer;
   private final List<ProtectedIndexStrategy> protectedIndexStrategies;
+  private final SearchPolicy searchPolicy;
+  private final SearchPlanner searchPlanner;
   private final TokenIndexRepository repository;
   private final CodePointLevenshteinScorer scorer;
   private final Icu4jTransliterationProvider transliterationProvider;
@@ -78,10 +80,30 @@ public final class EncryptedFuzzySearchService {
       CanonicalTextNormalizer textNormalizer,
       List<? extends ProtectedIndexStrategy> protectedIndexStrategies,
       TokenIndexRepository repository) {
+    this(
+        keyDeriver,
+        fieldCipher,
+        textNormalizer,
+        protectedIndexStrategies,
+        repository,
+        SearchPolicy.productionDefault());
+  }
+
+  /** Creates the service with an explicit strategy allowlist and leakage policy. */
+  public EncryptedFuzzySearchService(
+      ScopedKeyDeriver keyDeriver,
+      AuthenticatedFieldCipher fieldCipher,
+      CanonicalTextNormalizer textNormalizer,
+      List<? extends ProtectedIndexStrategy> protectedIndexStrategies,
+      TokenIndexRepository repository,
+      SearchPolicy searchPolicy) {
     this.keyDeriver = Objects.requireNonNull(keyDeriver, "keyDeriver");
     this.fieldCipher = Objects.requireNonNull(fieldCipher, "fieldCipher");
     this.textNormalizer = Objects.requireNonNull(textNormalizer, "textNormalizer");
     this.protectedIndexStrategies = validateStrategies(protectedIndexStrategies);
+    this.searchPolicy = Objects.requireNonNull(searchPolicy, "searchPolicy");
+    this.protectedIndexStrategies.forEach(this.searchPolicy::requireAllowed);
+    this.searchPlanner = new SearchPlanner();
     this.repository = Objects.requireNonNull(repository, "repository");
     this.scorer = new CodePointLevenshteinScorer();
     this.transliterationProvider = new Icu4jTransliterationProvider();
@@ -167,6 +189,76 @@ public final class EncryptedFuzzySearchService {
       throws GeneralSecurityException, SQLException, CharacterCodingException {
     return searchWithProfile(
         tenantId, fieldId, keyId, query, candidateLimit, minimumSimilarity, null);
+  }
+
+  /**
+   * Executes a request under its explicit accuracy contract and reports candidate completeness. The
+   * completeness metadata describes candidate generation before the minimum-similarity verifier; a
+   * saturated candidate limit invalidates an otherwise-proven completeness claim.
+   */
+  public SearchOutcome search(SearchRequest request)
+      throws GeneralSecurityException, SQLException, CharacterCodingException {
+    Objects.requireNonNull(request, "request");
+    SearchPlan plan =
+        searchPlanner.plan(request.accuracyContract(), protectedIndexStrategies, searchPolicy);
+    String canonicalQuery = textNormalizer.normalize(request.query());
+    SecretKey indexKey =
+        keyDeriver.deriveIndexKey(request.keyId(), request.tenantId(), request.fieldId());
+    List<ProtectedToken> queryTokens =
+        createStrategyTokens(indexKey, canonicalQuery, null, plan.strategies());
+    List<SearchCandidate> candidates =
+        repository.findCandidates(
+            request.tenantId(),
+            request.fieldId(),
+            request.keyId(),
+            queryTokens,
+            request.candidateLimit() + 1);
+    boolean candidateLimitExceeded = candidates.size() > request.candidateLimit();
+    List<SearchCandidate> candidatesToVerify =
+        candidates.stream().limit(request.candidateLimit()).toList();
+
+    List<FuzzySearchResult> matches = new ArrayList<>();
+    for (SearchCandidate candidate : candidatesToVerify) {
+      if (!CanonicalTextNormalizer.TRANSFORM_ID.equals(candidate.transformVersion())) {
+        throw new GeneralSecurityException("candidate uses an unsupported text transform");
+      }
+      byte[] associatedData =
+          associatedData(
+              request.tenantId(), request.fieldId(), candidate.recordId(), candidate.keyId());
+      byte[] plaintext = null;
+      try {
+        SecretKey encryptionKey =
+            keyDeriver.deriveEncryptionKey(
+                candidate.keyId(), request.tenantId(), request.fieldId());
+        plaintext = fieldCipher.decrypt(encryptionKey, candidate.ciphertext(), associatedData);
+        String value = decodeUtf8(plaintext);
+        String canonicalValue = textNormalizer.normalize(value);
+        if (plan.accuracyContract().mode() == SearchMode.BOUNDED_FUZZY
+            && scorer.distance(canonicalQuery, canonicalValue)
+                > plan.accuracyContract().maximumEditDistance()) {
+          continue;
+        }
+        double similarity = scorer.score(canonicalQuery, canonicalValue);
+        if (similarity >= request.minimumSimilarity()) {
+          matches.add(
+              new FuzzySearchResult(
+                  candidate.recordId(), value, similarity, candidate.overlapCount()));
+        }
+      } finally {
+        Arrays.fill(associatedData, (byte) 0);
+        if (plaintext != null) {
+          Arrays.fill(plaintext, (byte) 0);
+        }
+      }
+    }
+    matches.sort(RESULT_ORDER);
+    return new SearchOutcome(
+        matches,
+        plan.accuracyContract(),
+        plan.candidateCompleteness(),
+        candidateLimitExceeded,
+        candidatesToVerify.size(),
+        plan.strategyIds());
   }
 
   /** Searches a field whose values were indexed with the same explicit transform profile. */
@@ -349,9 +441,18 @@ public final class EncryptedFuzzySearchService {
   private List<ProtectedToken> createStrategyTokens(
       SecretKey indexKey, String canonicalText, String transformId)
       throws GeneralSecurityException {
+    return createStrategyTokens(indexKey, canonicalText, transformId, protectedIndexStrategies);
+  }
+
+  private List<ProtectedToken> createStrategyTokens(
+      SecretKey indexKey,
+      String canonicalText,
+      String transformId,
+      List<ProtectedIndexStrategy> strategies)
+      throws GeneralSecurityException {
     List<ProtectedToken> tokens = new ArrayList<>();
     Set<String> strategyIds = new HashSet<>();
-    for (ProtectedIndexStrategy strategy : protectedIndexStrategies) {
+    for (ProtectedIndexStrategy strategy : strategies) {
       String strategyId = strategy.strategyId(transformId);
       if (!strategyIds.add(strategyId)) {
         throw new GeneralSecurityException("configured strategies produced a namespace collision");

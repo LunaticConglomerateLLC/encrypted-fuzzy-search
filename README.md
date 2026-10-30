@@ -9,6 +9,7 @@ The project has released v0.1.0, its cryptographic foundation. Current developme
 - Authenticated encryption for application fields.
 - Keyed indexes for exact and fuzzy candidate retrieval.
 - Authorized final verification and ranking in the application.
+- Explicit exact, bounded-fuzzy, and approximate search contracts with completeness metadata.
 - Unicode normalization and multilingual search variants.
 - A framework-independent core with PostgreSQL as the first storage adapter.
 
