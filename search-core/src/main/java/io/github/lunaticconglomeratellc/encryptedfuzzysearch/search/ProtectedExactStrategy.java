@@ -42,6 +42,11 @@ public final class ProtectedExactStrategy implements ProtectedIndexStrategy {
   }
 
   @Override
+  public CandidateCompleteness candidateCompleteness() {
+    return CandidateCompleteness.exact();
+  }
+
+  @Override
   public Set<IndexLeakage> leakageMetadata() {
     return Set.of(IndexLeakage.EQUALITY, IndexLeakage.FREQUENCY);
   }

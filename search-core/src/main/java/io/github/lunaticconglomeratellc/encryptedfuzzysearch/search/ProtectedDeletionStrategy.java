@@ -85,6 +85,16 @@ public final class ProtectedDeletionStrategy implements ProtectedIndexStrategy {
     return CandidateMatchMode.ANY_SHARED_TOKEN;
   }
 
+  /**
+   * Every pair at Levenshtein distance at most the configured radius shares a subsequence token:
+   * remove the changed/inserted code points from each side. The guarantee applies only when both
+   * complete neighborhoods are generated within this strategy's input and token-count bounds.
+   */
+  @Override
+  public CandidateCompleteness candidateCompleteness() {
+    return CandidateCompleteness.boundedEditDistance(maxEditRadius);
+  }
+
   @Override
   public Set<IndexLeakage> leakageMetadata() {
     return Set.of(IndexLeakage.EQUALITY, IndexLeakage.FREQUENCY, IndexLeakage.TOKEN_OVERLAP);
