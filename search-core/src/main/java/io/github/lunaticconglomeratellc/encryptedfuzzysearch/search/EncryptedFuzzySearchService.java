@@ -16,9 +16,11 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import javax.crypto.SecretKey;
@@ -29,11 +31,19 @@ import javax.crypto.SecretKey;
 public final class EncryptedFuzzySearchService {
   public static final int MAX_CANDIDATE_LIMIT = 1000;
 
+  /** Maximum key versions accepted by one migration-window search request. */
+  public static final int MAX_KEY_VERSIONS_PER_SEARCH = 16;
+
   /** Maximum distinct protected tokens per index or query across all multilingual forms. */
   public static final int MAX_MULTILINGUAL_TOKEN_COUNT = 4096;
 
   private static final byte[] AAD_LABEL =
       "efs-search-record-aad-v1".getBytes(StandardCharsets.US_ASCII);
+  private static final Comparator<FuzzySearchResult> RESULT_ORDER =
+      Comparator.comparingDouble(FuzzySearchResult::similarity)
+          .reversed()
+          .thenComparing(Comparator.comparingInt(FuzzySearchResult::overlapCount).reversed())
+          .thenComparing(FuzzySearchResult::recordId);
   private final ScopedKeyDeriver keyDeriver;
   private final AuthenticatedFieldCipher fieldCipher;
   private final CanonicalTextNormalizer textNormalizer;
@@ -179,6 +189,77 @@ public final class EncryptedFuzzySearchService {
         Objects.requireNonNull(profile, "profile"));
   }
 
+  /**
+   * Searches records indexed under any of the supplied key versions during a key migration.
+   * Candidate limiting applies independently to each key version; result IDs are deduplicated and
+   * the best verified match is retained. The caller controls which versions remain searchable.
+   */
+  public List<FuzzySearchResult> searchAcrossKeyVersions(
+      String tenantId,
+      String fieldId,
+      List<String> keyIds,
+      String query,
+      int candidateLimitPerKeyVersion,
+      double minimumSimilarity)
+      throws GeneralSecurityException, SQLException, CharacterCodingException {
+    return searchAcrossKeyVersionsInternal(
+        tenantId, fieldId, keyIds, query, candidateLimitPerKeyVersion, minimumSimilarity, null);
+  }
+
+  /** Searches migration-window records indexed with an explicit multilingual transform profile. */
+  public List<FuzzySearchResult> searchAcrossKeyVersions(
+      String tenantId,
+      String fieldId,
+      List<String> keyIds,
+      String query,
+      int candidateLimitPerKeyVersion,
+      double minimumSimilarity,
+      TransliterationProfile profile)
+      throws GeneralSecurityException, SQLException, CharacterCodingException {
+    return searchAcrossKeyVersionsInternal(
+        tenantId,
+        fieldId,
+        keyIds,
+        query,
+        candidateLimitPerKeyVersion,
+        minimumSimilarity,
+        Objects.requireNonNull(profile, "profile"));
+  }
+
+  private List<FuzzySearchResult> searchAcrossKeyVersionsInternal(
+      String tenantId,
+      String fieldId,
+      List<String> keyIds,
+      String query,
+      int candidateLimitPerKeyVersion,
+      double minimumSimilarity,
+      TransliterationProfile profile)
+      throws GeneralSecurityException, SQLException, CharacterCodingException {
+    List<String> validatedKeyIds = validateKeyVersions(keyIds);
+    List<FuzzySearchResult> results = new ArrayList<>();
+    for (String keyId : validatedKeyIds) {
+      results.addAll(
+          searchWithProfile(
+              tenantId,
+              fieldId,
+              keyId,
+              query,
+              candidateLimitPerKeyVersion,
+              minimumSimilarity,
+              profile));
+    }
+
+    Map<String, FuzzySearchResult> bestResultByRecord = new HashMap<>();
+    for (FuzzySearchResult result : results) {
+      bestResultByRecord.merge(
+          result.recordId(),
+          result,
+          (existing, candidate) ->
+              RESULT_ORDER.compare(candidate, existing) < 0 ? candidate : existing);
+    }
+    return bestResultByRecord.values().stream().sorted(RESULT_ORDER).toList();
+  }
+
   private List<FuzzySearchResult> searchWithProfile(
       String tenantId,
       String fieldId,
@@ -240,12 +321,24 @@ public final class EncryptedFuzzySearchService {
         }
       }
     }
-    matches.sort(
-        Comparator.comparingDouble(FuzzySearchResult::similarity)
-            .reversed()
-            .thenComparing(Comparator.comparingInt(FuzzySearchResult::overlapCount).reversed())
-            .thenComparing(FuzzySearchResult::recordId));
+    matches.sort(RESULT_ORDER);
     return List.copyOf(matches);
+  }
+
+  private static List<String> validateKeyVersions(List<String> keyIds) {
+    Objects.requireNonNull(keyIds, "keyIds");
+    if (keyIds.isEmpty() || keyIds.size() > MAX_KEY_VERSIONS_PER_SEARCH) {
+      throw new IllegalArgumentException(
+          "keyIds must contain between 1 and " + MAX_KEY_VERSIONS_PER_SEARCH + " versions");
+    }
+    List<String> validated = List.copyOf(keyIds);
+    if (new HashSet<>(validated).size() != validated.size()) {
+      throw new IllegalArgumentException("keyIds must not contain duplicates");
+    }
+    for (String keyId : validated) {
+      requireIdentifier(keyId, "keyId");
+    }
+    return validated;
   }
 
   /** Deletes both ciphertext and all associated protected token postings. */

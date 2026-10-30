@@ -106,3 +106,26 @@ Environment: Gradle 9.8.1 wrapper, JDK 25.0.4.1, PostgreSQL 18.6 in digest-pinne
 | PostgreSQL token / record relation sizes | 6,848,512 / 253,952 bytes |
 
 Interpretation: the protected-token OR retrieval included every relevant record in this fixture, but returned the maximum 100 candidates on every typo query, so candidate precision was only 1%. Final Levenshtein verification removed the observed hard negatives for this corpus and threshold. The saturation and low retrieval precision are important limitations, not evidence that 100 is a generally safe cap: unseen relevant candidates may be truncated, and the fixture is a narrow ASCII workload. Further strategy/overlap tuning should be evaluated on a new held-out corpus before setting any candidate or accuracy target. The latency and throughput are local, single-run measurements without a production hardware profile.
+
+### Review rerun (2026-10-21)
+
+The deterministic benchmark was rerun against PostgreSQL 18.6 on JDK 25.0.4.1, macOS/aarch64, 12 reported processors, and a 9 GiB JVM maximum heap. It used the same corpus seed, 600 records, 300 held-out single-substitution queries, 50 no-match queries, candidate limit 100, and similarity threshold 0.80. The process ran from a dirty working tree based on revision `5bd8ac7`; the review changes did not alter the benchmark fixture or default exact/n-gram strategy, but this is not a clean-release-artifact measurement.
+
+| Measure | Observed result |
+| --- | ---: |
+| Candidate recall | 1.000 (300/300) |
+| Candidate precision | 0.010 (300/30,000 candidates) |
+| Candidate-limit saturation | 1.000 (300/300 queries returned the full cap) |
+| Final-match recall / precision | 1.000 / 1.000 |
+| No-match false-positive rate | 0/50 |
+| Candidate retrieval latency, p50 / p95 | 10.339 / 16.611 ms |
+| Full search latency, p50 / p95 | 10.749 / 19.053 ms |
+| Full search throughput | 81.54 queries/s |
+| Indexing throughput | 74.79 records/s |
+| Token postings / unique protected tokens | 20,256 / 6,859 |
+| Maximum / mean protected-token frequency | 40 / 2.953 |
+| Logical protected-token bytes / ciphertext bytes | 788,784 / 30,000 |
+| Logical index-to-ciphertext byte ratio | 26.293x |
+| PostgreSQL token / record relation sizes | 6,848,512 / 253,952 bytes |
+
+Interpretation remains unchanged: the candidate limit saturated for every typo query and retrieval precision was 1%, even though final verification matched this fixture perfectly. These local measurements do not establish a production SLO or a safe recall guarantee. The current release recommendation must account for this candidate-volume behavior, the absence of approved production thresholds/workload profiles, and the out-of-scope leakage acceptance for optional strategies.

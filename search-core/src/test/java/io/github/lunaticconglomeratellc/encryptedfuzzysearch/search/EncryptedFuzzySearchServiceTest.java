@@ -160,6 +160,82 @@ public class EncryptedFuzzySearchServiceTest {
     assertEquals(results.get(1).recordId(), "alice");
     assertTrue(results.get(1).similarity() >= 0.5);
     assertTrue(results.get(0).overlapCount() > 0);
+    byte[] plaintext = "Alice".getBytes(StandardCharsets.UTF_8);
+    assertTrue(!Arrays.equals(plaintext, repository.documents.getFirst().ciphertext()));
+    assertTrue(
+        repository.documents.getFirst().protectedTokens().stream()
+            .noneMatch(token -> Arrays.equals(plaintext, token.value())));
+  }
+
+  @Test
+  public void searchesAcrossKeyVersionsDuringRotationAndReturnsMixedVersionMatches()
+      throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), repository);
+    service.indexValue("tenant-a", "name", "old-record", "key-v1", "Alice");
+    service.indexValue("tenant-a", "name", "new-record", "key-v2", "Alicia");
+
+    List<FuzzySearchResult> results =
+        service.searchAcrossKeyVersions(
+            "tenant-a", "name", List.of("key-v1", "key-v2"), "Alicia", 10, 0.5);
+
+    assertEquals(
+        results.stream().map(FuzzySearchResult::recordId).toList(),
+        List.of("new-record", "old-record"));
+    assertEquals(
+        results.stream().map(FuzzySearchResult::recordId).distinct().count(), results.size());
+    assertEquals(
+        service
+            .searchAcrossKeyVersions("tenant-a", "name", List.of("key-v2"), "Alicia", 10, 1.0)
+            .getFirst()
+            .recordId(),
+        "new-record");
+  }
+
+  @Test
+  public void keyVersionSearchRequiresABoundedUniqueVersionList() {
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), new InMemoryRepository());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> service.searchAcrossKeyVersions("tenant-a", "name", List.of(), "Alice", 10, 0.0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.searchAcrossKeyVersions(
+                "tenant-a", "name", List.of("key-v1", "key-v1"), "Alice", 10, 0.0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.searchAcrossKeyVersions(
+                "tenant-a",
+                "name",
+                java.util.Collections.nCopies(
+                    EncryptedFuzzySearchService.MAX_KEY_VERSIONS_PER_SEARCH + 1, "key-v1"),
+                "Alice",
+                10,
+                0.0));
+    assertThrows(
+        NullPointerException.class,
+        () -> service.searchAcrossKeyVersions("tenant-a", "name", null, "Alice", 10, 0.0));
+  }
+
+  @Test
+  public void keepsTheBestVerifiedMatchWhenVersionsContainTheSameRecordId() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    repository.preserveMultipleKeyVersions();
+    EncryptedFuzzySearchService service = service(new AtomicInteger(), repository);
+    service.indexValue("tenant-a", "name", "alice", "key-v1", "Alice");
+    service.indexValue("tenant-a", "name", "alice", "key-v2", "Alicia");
+
+    List<FuzzySearchResult> results =
+        service.searchAcrossKeyVersions(
+            "tenant-a", "name", List.of("key-v1", "key-v2"), "Alicia", 10, 0.5);
+
+    assertEquals(results.size(), 1);
+    assertEquals(results.getFirst().recordId(), "alice");
+    assertEquals(results.getFirst().value(), "Alicia");
+    assertEquals(results.getFirst().similarity(), 1.0);
   }
 
   @Test
@@ -475,13 +551,16 @@ public class EncryptedFuzzySearchServiceTest {
     private String transformOverride;
     private String recordIdOverride;
     private int lastCandidateCount;
+    private boolean preserveVersions;
 
     @Override
     public void initializeSchema() {}
 
     @Override
     public void upsert(EncryptedSearchDocument document) {
-      delete(document.tenantId(), document.fieldId(), document.recordId());
+      if (!preserveVersions) {
+        delete(document.tenantId(), document.fieldId(), document.recordId());
+      }
       documents.add(document);
     }
 
@@ -551,6 +630,10 @@ public class EncryptedFuzzySearchServiceTest {
 
     private void overrideTransform(String transformVersion) {
       transformOverride = transformVersion;
+    }
+
+    private void preserveMultipleKeyVersions() {
+      preserveVersions = true;
     }
   }
 }
