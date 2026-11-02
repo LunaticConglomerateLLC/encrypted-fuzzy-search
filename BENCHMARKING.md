@@ -129,3 +129,19 @@ The deterministic benchmark was rerun against PostgreSQL 18.6 on JDK 25.0.4.1, m
 | PostgreSQL token / record relation sizes | 6,848,512 / 253,952 bytes |
 
 Interpretation remains unchanged: the candidate limit saturated for every typo query and retrieval precision was 1%, even though final verification matched this fixture perfectly. These local measurements do not establish a production SLO or a safe recall guarantee. The current release recommendation must account for this candidate-volume behavior, the absence of approved production thresholds/workload profiles, and the out-of-scope leakage acceptance for optional strategies.
+
+### Deterministic scorer comparison (2026-11-02)
+
+`./gradlew --no-daemon :search-core:test --tests '*ScorerComparisonTest'` compares built-in final scorers on four fixed synthetic name-like cases: an adjacent transposition, OCR-style `1`/letter substitutions, token reordering, and a token typo. Each scorer sees the same four authorized candidate strings per case. The test reports macro reciprocal rank (MRR) and top-1 count; it does not perform protected-token retrieval or use corpus-wide plaintext statistics.
+
+| Final scorer | MRR | Top-1 |
+| --- | ---: | ---: |
+| Code-point Levenshtein baseline | 0.8750 | 3/4 |
+| Damerau-Levenshtein (OSA) | 0.8750 | 3/4 |
+| Weighted edit (`1` to `i`/`l`, `0` to `o`) | 0.8750 | 3/4 |
+| Pair-local weighted character bigrams | 1.0000 | 4/4 |
+| Token-set Jaccard | 1.0000 | 4/4 |
+| Candidate-local BM25 | 0.8750 | 3/4 |
+| Candidate-local Soft TF-IDF | 1.0000 | 4/4 |
+
+This fixture shows that token-aware profiles rank its reordered and typo cases well; it does not establish general accuracy gains. Four examples are too few to tune or select a production scorer. The weighted edit profile uses only the listed caller-supplied OCR costs, so it does not improve the transposition case. The BM25 profile uses term statistics from the four candidates only. These final scoring differences do not alter candidate generation: the separate recorded PostgreSQL baseline still has 1% candidate precision and saturates the 100-candidate cap for every typo query. Use larger entity-disjoint held-out fixtures before drawing broader conclusions or changing defaults.

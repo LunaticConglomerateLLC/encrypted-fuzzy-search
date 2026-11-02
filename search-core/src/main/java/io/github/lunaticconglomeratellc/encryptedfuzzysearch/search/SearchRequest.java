@@ -11,7 +11,8 @@ public record SearchRequest(
     SearchAccuracyContract accuracyContract,
     int candidateLimit,
     double minimumSimilarity,
-    SearchExpansionOptions expansions) {
+    SearchExpansionOptions expansions,
+    FinalScorer finalScorer) {
   public SearchRequest {
     requireIdentifier(tenantId, "tenantId");
     requireIdentifier(fieldId, "fieldId");
@@ -19,6 +20,7 @@ public record SearchRequest(
     Objects.requireNonNull(query, "query");
     Objects.requireNonNull(accuracyContract, "accuracyContract");
     Objects.requireNonNull(expansions, "expansions");
+    Objects.requireNonNull(finalScorer, "finalScorer");
     if (candidateLimit < 1 || candidateLimit > EncryptedFuzzySearchService.MAX_CANDIDATE_LIMIT) {
       throw new IllegalArgumentException(
           "candidateLimit must be between 1 and "
@@ -49,7 +51,29 @@ public record SearchRequest(
         accuracyContract,
         candidateLimit,
         minimumSimilarity,
-        SearchExpansionOptions.none());
+        SearchExpansionOptions.none(),
+        new CodePointLevenshteinScorer());
+  }
+
+  public SearchRequest(
+      String tenantId,
+      String fieldId,
+      String keyId,
+      String query,
+      SearchAccuracyContract accuracyContract,
+      int candidateLimit,
+      double minimumSimilarity,
+      SearchExpansionOptions expansions) {
+    this(
+        tenantId,
+        fieldId,
+        keyId,
+        query,
+        accuracyContract,
+        candidateLimit,
+        minimumSimilarity,
+        expansions,
+        new CodePointLevenshteinScorer());
   }
 
   public static SearchRequest exact(
@@ -103,7 +127,22 @@ public record SearchRequest(
         accuracyContract,
         candidateLimit,
         minimumSimilarity,
-        expansions);
+        expansions,
+        finalScorer);
+  }
+
+  /** Returns an otherwise identical request using a built-in final-scoring profile. */
+  public SearchRequest withScorer(FinalScorer finalScorer) {
+    return new SearchRequest(
+        tenantId,
+        fieldId,
+        keyId,
+        query,
+        accuracyContract,
+        candidateLimit,
+        minimumSimilarity,
+        expansions,
+        finalScorer);
   }
 
   /** Prevent accidental logging of plaintext query and alias text from this request. */
@@ -111,6 +150,8 @@ public record SearchRequest(
   public String toString() {
     return "SearchRequest[query=<redacted>, mode="
         + accuracyContract.mode()
+        + ", scorer="
+        + finalScorer.id()
         + ", candidateLimit="
         + candidateLimit
         + ", expansions=<redacted>]";

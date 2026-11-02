@@ -46,6 +46,14 @@ public final class EncryptedFuzzySearchService {
           .reversed()
           .thenComparing(Comparator.comparingInt(FuzzySearchResult::overlapCount).reversed())
           .thenComparing(FuzzySearchResult::recordId);
+
+  private record VerifiedCandidate(
+      String recordId,
+      String value,
+      int overlapCount,
+      List<String> forms,
+      int levenshteinDistance) {}
+
   private final ScopedKeyDeriver keyDeriver;
   private final AuthenticatedFieldCipher fieldCipher;
   private final CanonicalTextNormalizer textNormalizer;
@@ -287,6 +295,14 @@ public final class EncryptedFuzzySearchService {
     Objects.requireNonNull(request, "request");
     SearchPlan plan =
         searchPlanner.plan(request.accuracyContract(), protectedIndexStrategies, searchPolicy);
+    if (!searchPolicy.allowsScorer(request.finalScorer())) {
+      throw new IllegalArgumentException(
+          "search policy does not allow scorer " + request.finalScorer().id());
+    }
+    if (request.accuracyContract().mode() == SearchMode.EXACT
+        && !CodePointLevenshteinScorer.ID.equals(request.finalScorer().id())) {
+      throw new IllegalArgumentException("exact mode requires the Levenshtein scoring profile");
+    }
     SearchExpansionOptions expansions = request.expansions();
     if (!expansions.aliases().isEmpty() && !searchPolicy.aliasesAllowed()) {
       throw new IllegalArgumentException("search policy does not allow known aliases");
@@ -328,7 +344,7 @@ public final class EncryptedFuzzySearchService {
     List<SearchCandidate> candidatesToVerify =
         candidates.stream().limit(request.candidateLimit()).toList();
 
-    List<FuzzySearchResult> matches = new ArrayList<>();
+    List<VerifiedCandidate> verifiedCandidates = new ArrayList<>();
     for (SearchCandidate candidate : candidatesToVerify) {
       String expectedTransform =
           transformId == null ? CanonicalTextNormalizer.TRANSFORM_ID : transformId;
@@ -351,27 +367,45 @@ public final class EncryptedFuzzySearchService {
                 ? List.of(canonicalValue)
                 : languageForms(canonicalValue, provider, languageSelection, providerVersion);
         int minimumDistance = Integer.MAX_VALUE;
-        double similarity = 0.0;
         for (String queryForm : queryForms) {
           for (String candidateForm : candidateForms) {
             minimumDistance = Math.min(minimumDistance, scorer.distance(queryForm, candidateForm));
-            similarity = Math.max(similarity, scorer.score(queryForm, candidateForm));
           }
         }
-        if (plan.accuracyContract().mode() == SearchMode.BOUNDED_FUZZY
-            && minimumDistance > plan.accuracyContract().maximumEditDistance()) {
-          continue;
-        }
-        if (similarity >= request.minimumSimilarity()) {
-          matches.add(
-              new FuzzySearchResult(
-                  candidate.recordId(), value, similarity, candidate.overlapCount()));
-        }
+        verifiedCandidates.add(
+            new VerifiedCandidate(
+                candidate.recordId(),
+                value,
+                candidate.overlapCount(),
+                candidateForms,
+                minimumDistance));
       } finally {
         Arrays.fill(associatedData, (byte) 0);
         if (plaintext != null) {
           Arrays.fill(plaintext, (byte) 0);
         }
+      }
+    }
+    List<Double> similarityScores =
+        request
+            .finalScorer()
+            .scoreCandidates(
+                queryForms, verifiedCandidates.stream().map(VerifiedCandidate::forms).toList());
+    if (similarityScores.size() != verifiedCandidates.size()) {
+      throw new IllegalStateException("scorer returned the wrong number of candidate scores");
+    }
+    List<FuzzySearchResult> matches = new ArrayList<>();
+    for (int index = 0; index < verifiedCandidates.size(); index++) {
+      VerifiedCandidate candidate = verifiedCandidates.get(index);
+      double similarity = FinalScorer.requireScore(similarityScores.get(index));
+      if (plan.accuracyContract().mode() == SearchMode.BOUNDED_FUZZY
+          && candidate.levenshteinDistance() > plan.accuracyContract().maximumEditDistance()) {
+        continue;
+      }
+      if (similarity >= request.minimumSimilarity()) {
+        matches.add(
+            new FuzzySearchResult(
+                candidate.recordId(), candidate.value(), similarity, candidate.overlapCount()));
       }
     }
     matches.sort(RESULT_ORDER);
@@ -382,7 +416,8 @@ public final class EncryptedFuzzySearchService {
         candidateLimitExceeded,
         candidatesToVerify.size(),
         plan.strategyIds(),
-        expansionProvenance);
+        expansionProvenance,
+        request.finalScorer().id());
   }
 
   /** Searches a field whose values were indexed with the same explicit transform profile. */

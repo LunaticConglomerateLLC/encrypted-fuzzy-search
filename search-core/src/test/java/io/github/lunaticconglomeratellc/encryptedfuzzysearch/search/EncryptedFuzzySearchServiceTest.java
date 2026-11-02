@@ -53,6 +53,41 @@ public class EncryptedFuzzySearchServiceTest {
   }
 
   @Test
+  public void experimentalScorerRequiresPolicyAndReportsItsProfile() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService defaultService = service(new AtomicInteger(), repository);
+    SearchRequest experimentalRequest =
+        SearchRequest.approximate("tenant-a", "name", "key-v1", "Marta Smith", 10, 0.0)
+            .withScorer(new TokenSetScorer());
+    assertThrows(IllegalArgumentException.class, () -> defaultService.search(experimentalRequest));
+    assertEquals(repository.findCandidateCalls, 0);
+
+    SearchPolicy policy =
+        expansionPolicy(false, Set.of()).allowingScorers(Set.of(TokenSetScorer.ID));
+    EncryptedFuzzySearchService service = serviceWithPolicy(repository, policy);
+    service.indexValue("tenant-a", "name", "full", "key-v1", "Marta Smith");
+    service.indexValue("tenant-a", "name", "partial", "key-v1", "Marta Jones");
+    SearchOutcome outcome = service.search(experimentalRequest);
+
+    assertEquals(outcome.scoringProfileId(), TokenSetScorer.ID);
+    assertEquals(outcome.matches().getFirst().recordId(), "full");
+  }
+
+  @Test
+  public void exactModeCannotUseNonExactFinalScorerEvenWhenAllowlisted() {
+    InMemoryRepository repository = new InMemoryRepository();
+    SearchPolicy policy =
+        expansionPolicy(false, Set.of()).allowingScorers(Set.of(TokenSetScorer.ID));
+    EncryptedFuzzySearchService service = serviceWithPolicy(repository, policy);
+    SearchRequest request =
+        SearchRequest.exact("tenant-a", "name", "key-v1", "Marta Smith", 10)
+            .withScorer(new TokenSetScorer());
+
+    assertThrows(IllegalArgumentException.class, () -> service.search(request));
+    assertEquals(repository.findCandidateCalls, 0);
+  }
+
+  @Test
   public void rejectsDuplicateStrategyNamespaces() {
     ProtectedIndexStrategy bigrams = new ProtectedNgramStrategy(2, new NgramBlindIndexer());
 
