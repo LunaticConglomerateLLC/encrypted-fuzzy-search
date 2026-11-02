@@ -5,11 +5,24 @@ import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ExactBlindIn
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.NgramBlindIndexer;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ScopedKeyDeriver;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.CanonicalTextNormalizer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.CandidateLocalBm25Scorer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.CodePointLevenshteinScorer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.DamerauLevenshteinScorer;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.EncryptedFuzzySearchService;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.FinalScorer;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.FuzzySearchResult;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.ProtectedExactStrategy;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.ProtectedIndexStrategy;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.ProtectedNgramStrategy;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.ProtectedToken;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.SearchCandidate;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.SearchOutcome;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.SearchPolicy;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.SearchRequest;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.SoftTfIdfScorer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.TokenSetScorer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.WeightedEditScorer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.search.WeightedNgramScorer;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -65,15 +78,21 @@ public final class FuzzySearchBenchmark {
     ProtectedNgramStrategy trigrams = new ProtectedNgramStrategy(3, ngramIndexer);
     CanonicalTextNormalizer normalizer = new CanonicalTextNormalizer();
     ExactBlindIndexer exactIndexer = new ExactBlindIndexer();
+    List<ProtectedIndexStrategy> strategies =
+        List.of(new ProtectedExactStrategy(exactIndexer), bigrams, trigrams);
+    List<FinalScorer> scorers = scorers();
     EncryptedFuzzySearchService service =
         new EncryptedFuzzySearchService(
             keyDeriver,
             new AuthenticatedFieldCipher(),
-            exactIndexer,
             normalizer,
-            bigrams,
-            trigrams,
-            repository);
+            strategies,
+            repository,
+            SearchPolicy.productionDefault()
+                .allowingScorers(
+                    scorers.stream()
+                        .map(FinalScorer::id)
+                        .collect(java.util.stream.Collectors.toSet())));
 
     List<Fixture> corpus = createCorpus();
     long indexStarted = System.nanoTime();
@@ -160,6 +179,8 @@ public final class FuzzySearchBenchmark {
       }
     }
     finalFalsePositives += noMatchFalsePositives;
+
+    printScorerComparisons(service, queryCases, scorers);
 
     long physicalTokenBytes =
         queryLong(dataSource, "SELECT pg_total_relation_size('efs_protected_tokens')");
@@ -250,6 +271,85 @@ public final class FuzzySearchBenchmark {
         "measurement_mode=single-threaded local Docker database, 30 warm-up queries excluded from timed samples");
     System.out.println(
         "limitations=single synthetic corpus and local environment; measurements are exploratory, not SLOs or recall guarantees");
+  }
+
+  private static List<FinalScorer> scorers() {
+    return List.of(
+        new CodePointLevenshteinScorer(),
+        new DamerauLevenshteinScorer(),
+        new WeightedEditScorer(Map.of("1i", 0.2, "1l", 0.2, "0o", 0.2)),
+        new WeightedNgramScorer(2),
+        new TokenSetScorer(),
+        new CandidateLocalBm25Scorer(),
+        new SoftTfIdfScorer(0.75));
+  }
+
+  private static void printScorerComparisons(
+      EncryptedFuzzySearchService service, List<QueryCase> queryCases, List<FinalScorer> scorers)
+      throws Exception {
+    System.out.println("v0.2 candidate-set final scorer comparison (same retrieved candidates):");
+    for (FinalScorer scorer : scorers) {
+      int truePositives = 0;
+      int falsePositives = 0;
+      int topOne = 0;
+      int noMatchFalsePositives = 0;
+      double reciprocalRankSum = 0.0;
+      for (QueryCase query : queryCases) {
+        SearchOutcome outcome =
+            service.search(
+                SearchRequest.approximate(
+                        TENANT_ID,
+                        FIELD_ID,
+                        KEY_ID,
+                        query.value(),
+                        CANDIDATE_LIMIT,
+                        MINIMUM_SIMILARITY)
+                    .withScorer(scorer));
+        List<FuzzySearchResult> results = outcome.matches();
+        int targetRank = 0;
+        for (int rank = 0; rank < results.size(); rank++) {
+          if (results.get(rank).recordId().equals(query.expectedId())) {
+            truePositives++;
+            targetRank = rank + 1;
+            if (rank == 0) {
+              topOne++;
+            }
+          } else {
+            falsePositives++;
+          }
+        }
+        if (targetRank != 0) {
+          reciprocalRankSum += 1.0 / targetRank;
+        }
+      }
+      for (int index = 0; index < NO_MATCH_QUERY_COUNT; index++) {
+        String query = "zzzzzzzzzz" + index;
+        if (!service
+            .search(
+                SearchRequest.approximate(
+                        TENANT_ID, FIELD_ID, KEY_ID, query, CANDIDATE_LIMIT, MINIMUM_SIMILARITY)
+                    .withScorer(scorer))
+            .matches()
+            .isEmpty()) {
+          noMatchFalsePositives++;
+        }
+      }
+      falsePositives += noMatchFalsePositives;
+      String precision =
+          truePositives + falsePositives == 0
+              ? "undefined (no accepted results)"
+              : "%.4f".formatted((double) truePositives / (truePositives + falsePositives));
+      System.out.printf(
+          "%s: final_recall=%.4f, final_precision=%s, mrr=%.4f, top1=%d/%d, no_match_fp=%d/%d%n",
+          scorer.id(),
+          (double) truePositives / queryCases.size(),
+          precision,
+          reciprocalRankSum / queryCases.size(),
+          topOne,
+          queryCases.size(),
+          noMatchFalsePositives,
+          NO_MATCH_QUERY_COUNT);
+    }
   }
 
   private static List<Fixture> createCorpus() {

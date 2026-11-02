@@ -11,6 +11,8 @@ The project has released v0.1.0, its cryptographic foundation. Current developme
 - Authorized final verification and ranking in the application.
 - Explicit exact, bounded-fuzzy, and approximate search contracts with completeness metadata.
 - Opt-in caller-supplied aliases and explicitly selected transliteration providers.
+- Experimental final-scoring profiles for edit, token, and candidate-local ranking comparisons.
+- Explicitly allowlisted isotonic score calibration with held-out evaluation metrics.
 - Unicode normalization and multilingual search variants.
 - A framework-independent core with PostgreSQL as the first storage adapter.
 

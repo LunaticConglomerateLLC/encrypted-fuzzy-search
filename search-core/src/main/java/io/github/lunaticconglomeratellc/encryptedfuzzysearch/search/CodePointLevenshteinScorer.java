@@ -3,7 +3,14 @@ package io.github.lunaticconglomeratellc.encryptedfuzzysearch.search;
 import java.util.Objects;
 
 /** Computes case-sensitive normalized Levenshtein similarity over Unicode code points. */
-public final class CodePointLevenshteinScorer {
+public final class CodePointLevenshteinScorer implements FinalScorer {
+  public static final String ID = "levenshtein-codepoint-v1";
+
+  @Override
+  public String id() {
+    return ID;
+  }
+
   /** Returns 1 for identical strings and 0 when every code point in the longer string differs. */
   public double score(String left, String right) {
     Objects.requireNonNull(left, "left");

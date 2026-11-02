@@ -2,7 +2,7 @@ package io.github.lunaticconglomeratellc.encryptedfuzzysearch.search;
 
 import java.util.Objects;
 
-/** Authorized plaintext result after candidate decryption and fuzzy verification. */
+/** Authorized plaintext result after candidate decryption, scoring, and optional calibration. */
 public record FuzzySearchResult(
     String recordId, String value, double similarity, int overlapCount) {
   public FuzzySearchResult {
