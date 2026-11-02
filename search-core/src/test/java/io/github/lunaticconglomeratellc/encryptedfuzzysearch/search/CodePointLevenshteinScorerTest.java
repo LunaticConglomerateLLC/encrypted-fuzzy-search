@@ -16,6 +16,9 @@ public class CodePointLevenshteinScorerTest {
     assertEquals(scorer.score("abc", "abcd"), 0.75);
     assertEquals(scorer.score("abcd", "ab"), 0.5);
     assertEquals(scorer.score("abc", "xyz"), 0.0);
+    assertEquals(scorer.distance("abc", "axc"), 1);
+    assertEquals(scorer.distance("😀", ""), 1);
+    assertEquals(scorer.distance("abc", "abc"), 0);
   }
 
   @Test
