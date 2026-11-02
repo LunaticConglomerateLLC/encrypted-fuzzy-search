@@ -80,6 +80,26 @@ The following remain open until owners review empirical baselines and intended d
 
 Do not claim an accuracy, scale, or latency guarantee until the threshold is agreed and the relevant held-out benchmark evidence exists.
 
+## Paired plaintext and EFS comparison contract
+
+The v3.1 suite compares modes on the same deterministic synthetic records, entity split, queries, expected entity labels, normalization, n-gram semantics, candidate limit, scoring profile, database version/configuration, and load profile. Load the fixture independently for each mode and record the fixture seed and source revision. Compare absolute values and paired deltas; report percentage overhead only when the plaintext measurement is non-zero. A mode comparison is useful only when the correctness measures are reported alongside performance.
+
+| Benchmark mode | Stored field payload | Stored search postings | Intended use |
+| --- | --- | --- | --- |
+| `PLAINTEXT_CONTROL` | Canonical plaintext | Raw canonical n-grams | Synthetic reference for the same search behavior without storage protection |
+| `EFS_FULL` | AES-GCM ciphertext | HMAC-protected n-grams | Production EFS design under evaluation |
+| `EFS_PAYLOAD_ONLY_DIAGNOSTIC` | AES-GCM ciphertext | Raw canonical n-grams | Optional synthetic-only diagnosis that separates payload encryption from protected-index costs |
+
+`EFS_PAYLOAD_ONLY_DIAGNOSTIC` is a benchmark-only mode, leaks n-gram content, must use generated test data in a disposable local database, and must not be selectable through production application configuration. Never use customer or real personal data for either plaintext mode. Do not print payloads, normalized forms, postings, keys, or query text in logs or reports.
+
+The primary correctness comparison reports candidate recall/precision/count before decrypt-and-verify and final precision/recall after verification. It also reports no-match false positives and candidate-cap saturation by query stratum. All modes use the same labels and acceptance threshold for a given profile; if actual match sets differ, report the difference instead of silently tuning one mode to match another. The benchmark is a comparator, not evidence that plaintext storage meets EFS privacy properties.
+
+For each mode, separate fixture loading/indexing from query runs. For queries report latency distributions (p50, p95, p99), achieved query rate, failures/timeouts, candidate counts, and cap saturation. State whether each measurement includes normalization, key derivation/access, token generation, database retrieval, decryption, and final scoring. Run single-client and concurrent profiles; record load shape and concurrency. Treat cold-start and warmed steady-state measurements as distinct runs with an explicit reset/warmup procedure.
+
+Report storage as payload bytes, logical posting bytes, total PostgreSQL relation/index bytes, and bytes per record. Keep JVM CPU/heap/GC and PostgreSQL resource/configuration context separate. Component-level JVM timings belong in JMH reports and must not be presented as end-to-end service latency. SQL-only `pgbench` results also remain separate from full Java/EFS request results.
+
+Initial v3.1 reports establish reproducible baselines and relative costs only. No maximum latency, minimum throughput, acceptable encryption overhead, or capacity promise is a release gate until the owner approves a representative deployment workload and threshold.
+
 ## Exploratory PostgreSQL baseline
 
 The repository provides a deterministic synthetic benchmark runner in the PostgreSQL adapter test source set. Start the disposable Compose database, then run `./gradlew --no-daemon :postgres-adapter:fuzzySearchBenchmark`. The runner seeds 400 unique synthetic positive records and 200 prefix-sharing hard negatives from seed `20261019`, evaluates 300 single-substitution queries and 50 no-match queries, and excludes 30 warm-up searches from timed samples. It emits aggregate metrics and runtime/database metadata only; it does not print synthetic values or protected tokens. It reports retrieval recall/precision separately from final-match recall/precision, as well as index/token frequency, latency, throughput, and PostgreSQL relation sizes. These numbers are a local exploratory baseline, not a release threshold, production estimate, or security guarantee.
