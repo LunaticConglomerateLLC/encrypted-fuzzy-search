@@ -163,3 +163,66 @@ The PostgreSQL benchmark runner now also applies each scorer to the same v0.2 ca
 This fixture contains one continuous random code-point token per record and only single substitutions. It therefore does not exercise token order, multiple terms, OCR confusions, or adjacent transpositions. The zero-result token-set/BM25 precision is undefined, not zero. Weighted bigrams rejected most relevant candidates at threshold `0.80`; candidate retrieval itself still included them. Soft TF-IDF handled this single-token typo workload, while the small name-like fixture above favors token-aware profiles on different transformations. These results show dataset dependence and are exploratory; they do not justify changing the default scorer or establish general quality.
 
 The isotonic-calibration sanity test fits 20 synthetic score/label pairs (10 per class) and evaluates four separate synthetic held-out examples. On that deliberately separable fixture it reports Brier score `0.0000` and expected calibration error `0.0000`. This checks model fitting and metric calculation only; four held-out cases do not support a real-world confidence claim or production calibration.
+
+### Entity-disjoint advanced-scoring evaluation (2026-11-02)
+
+Run it with `./gradlew --no-daemon :search-core:test --tests '*ScorerComparisonTest'`. `ScorerComparisonTest.evaluatesStratifiedScorersAndCalibrationOnEntityDisjointSplits` compares the default code-point Levenshtein scorer with the six experimental scorer profiles on a deterministic generated corpus (fixture generator v1, entities numbered 0 through 479). It uses 240 tuning entities and 240 separate held-out entities, with 40 held-out queries in each stratum: single substitution, adjacent transposition, OCR confusion, token reorder, token deletion, and Unicode diacritic. Thresholds are selected only on tuning entities by maximizing F1; scorer parameters remain fixed. The scorer comparison uses the same `candidateLimit=100` and a controlled 100-record cohort per query (one labeled target, three named hard negatives, and 96 distractors). Candidate tokens are generated with the production protected bigram and trigram strategies and HMAC indexer; candidate recall, precision, and count are measured after `ANY_SHARED_TOKEN` retrieval and before final scoring. This is an in-memory synthetic evaluation, not a PostgreSQL performance run.
+
+The same split fits one isotonic calibration model per scorer from tuning candidate scores and labels, then reports raw and calibrated Brier score and 10-bin expected calibration error on held-out candidate scores. Each scorer has 24,000 tuning pairs and 24,000 held-out pairs. Training and held-out entity IDs do not overlap. Candidate-local BM25 and Soft TF-IDF see only the retrieved candidates for each query.
+
+| Held-out stratum | Scorer | Candidate recall / precision; mean count | Final recall / precision | MRR | Top-1 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Single substitution | Levenshtein | 1.000 / 0.0115; 87.15 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Single substitution | Damerau-Levenshtein | 1.000 / 0.0115; 87.15 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Single substitution | Weighted edit | 1.000 / 0.0115; 87.15 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Single substitution | Weighted bigrams | 1.000 / 0.0115; 87.15 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Single substitution | Token Jaccard | 1.000 / 0.0115; 87.15 | 1.000 / 0.333 | 1.000 | 40/40 |
+| Single substitution | Candidate BM25 | 1.000 / 0.0115; 87.15 | 1.000 / 0.333 | 1.000 | 40/40 |
+| Single substitution | Soft TF-IDF | 1.000 / 0.0115; 87.15 | 1.000 / 0.533 | 1.000 | 40/40 |
+| Adjacent transposition | Levenshtein | 1.000 / 0.0110; 90.70 | 0.000 / undefined | 0.500 | 0/40 |
+| Adjacent transposition | Damerau-Levenshtein | 1.000 / 0.0110; 90.70 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Adjacent transposition | Weighted edit | 1.000 / 0.0110; 90.70 | 0.000 / undefined | 0.500 | 0/40 |
+| Adjacent transposition | Weighted bigrams | 1.000 / 0.0110; 90.70 | 0.000 / undefined | 0.500 | 0/40 |
+| Adjacent transposition | Token Jaccard | 1.000 / 0.0110; 90.70 | 1.000 / 0.333 | 0.500 | 0/40 |
+| Adjacent transposition | Candidate BM25 | 1.000 / 0.0110; 90.70 | 1.000 / 0.333 | 0.500 | 0/40 |
+| Adjacent transposition | Soft TF-IDF | 1.000 / 0.0110; 90.70 | 0.900 / 0.500 | 0.500 | 0/40 |
+| OCR confusion | Levenshtein | 1.000 / 0.0109; 91.65 | 1.000 / 1.000 | 1.000 | 40/40 |
+| OCR confusion | Damerau-Levenshtein | 1.000 / 0.0109; 91.65 | 1.000 / 1.000 | 1.000 | 40/40 |
+| OCR confusion | Weighted edit | 1.000 / 0.0109; 91.65 | 1.000 / 1.000 | 1.000 | 40/40 |
+| OCR confusion | Weighted bigrams | 1.000 / 0.0109; 91.65 | 1.000 / 1.000 | 1.000 | 40/40 |
+| OCR confusion | Token Jaccard | 1.000 / 0.0109; 91.65 | 1.000 / 1.000 | 1.000 | 40/40 |
+| OCR confusion | Candidate BM25 | 1.000 / 0.0109; 91.65 | 1.000 / 1.000 | 1.000 | 40/40 |
+| OCR confusion | Soft TF-IDF | 1.000 / 0.0109; 91.65 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Token reorder | Levenshtein | 1.000 / 0.0110; 90.68 | 0.000 / undefined | 1.000 | 40/40 |
+| Token reorder | Damerau-Levenshtein | 1.000 / 0.0110; 90.68 | 0.000 / undefined | 1.000 | 40/40 |
+| Token reorder | Weighted edit | 1.000 / 0.0110; 90.68 | 0.000 / undefined | 1.000 | 40/40 |
+| Token reorder | Weighted bigrams | 1.000 / 0.0110; 90.68 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Token reorder | Token Jaccard | 1.000 / 0.0110; 90.68 | 1.000 / 0.333 | 1.000 | 40/40 |
+| Token reorder | Candidate BM25 | 1.000 / 0.0110; 90.68 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Token reorder | Soft TF-IDF | 1.000 / 0.0110; 90.68 | 1.000 / 0.500 | 1.000 | 40/40 |
+| Token deletion | Levenshtein | 1.000 / 0.0112; 89.05 | 1.000 / 0.500 | 0.500 | 0/40 |
+| Token deletion | Damerau-Levenshtein | 1.000 / 0.0112; 89.05 | 1.000 / 0.500 | 0.500 | 0/40 |
+| Token deletion | Weighted edit | 1.000 / 0.0112; 89.05 | 1.000 / 0.500 | 0.500 | 0/40 |
+| Token deletion | Weighted bigrams | 1.000 / 0.0112; 89.05 | 1.000 / 0.500 | 0.500 | 0/40 |
+| Token deletion | Token Jaccard | 1.000 / 0.0112; 89.05 | 1.000 / 0.333 | 0.500 | 0/40 |
+| Token deletion | Candidate BM25 | 1.000 / 0.0112; 89.05 | 1.000 / 0.333 | 0.500 | 0/40 |
+| Token deletion | Soft TF-IDF | 1.000 / 0.0112; 89.05 | 1.000 / 0.500 | 0.500 | 0/40 |
+| Unicode diacritic | Levenshtein | 1.000 / 0.0113; 88.78 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Unicode diacritic | Damerau-Levenshtein | 1.000 / 0.0113; 88.78 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Unicode diacritic | Weighted edit | 1.000 / 0.0113; 88.78 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Unicode diacritic | Weighted bigrams | 1.000 / 0.0113; 88.78 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Unicode diacritic | Token Jaccard | 1.000 / 0.0113; 88.78 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Unicode diacritic | Candidate BM25 | 1.000 / 0.0113; 88.78 | 1.000 / 1.000 | 1.000 | 40/40 |
+| Unicode diacritic | Soft TF-IDF | 1.000 / 0.0113; 88.78 | 1.000 / 1.000 | 1.000 | 40/40 |
+
+| Scorer | Tuning threshold | Raw Brier / ECE | Calibrated Brier / ECE |
+| --- | ---: | ---: | ---: |
+| Levenshtein | 0.9412 | 0.053000 / 0.194966 | 0.005000 / 0.002267 |
+| Damerau-Levenshtein | 0.9412 | 0.053126 / 0.195170 | 0.003355 / 0.001153 |
+| Weighted edit | 0.9412 | 0.053277 / 0.195237 | 0.004907 / 0.002267 |
+| Weighted bigrams | 0.7609 | 0.010695 / 0.047190 | 0.002788 / 0.000016 |
+| Token Jaccard | 0.3333 | 0.005783 / 0.001239 | 0.005719 / 0.000000 |
+| Candidate BM25 | 1.0000 | 0.011852 / 0.012759 | 0.005576 / 0.000000 |
+| Soft TF-IDF | 0.8832 | 0.013757 / 0.016033 | 0.004138 / 0.000174 |
+
+Interpretation: candidate recall and precision did not vary by final scorer because scorers are applied after protected retrieval; this controlled in-memory corpus yielded full candidate recall and 1% candidate precision in every stratum. Final thresholds were selected on tuning data, and the held-out scores expose tradeoffs: Damerau-Levenshtein helps the transposition stratum; several profiles fail token reordering or deletion at their tuned thresholds; token-set and candidate-local ranking can accept more false positives. Isotonic fitting improved held-out Brier/ECE on this generated sample, but the fixture uses repeated templates and controlled transformations. These are reproducible prototype measurements, not production calibration evidence, a guarantee, or a reason to change production defaults.
