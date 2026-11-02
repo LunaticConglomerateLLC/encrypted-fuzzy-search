@@ -369,17 +369,25 @@ public final class FuzzySearchBenchmark {
   }
 
   static List<Fixture> createCorpus() {
+    return createCorpus(POSITIVE_RECORD_COUNT, HARD_NEGATIVE_COUNT);
+  }
+
+  static List<Fixture> createCorpus(int positiveCount, int hardNegativeCount) {
+    if (positiveCount < 1 || hardNegativeCount < 0) {
+      throw new IllegalArgumentException(
+          "corpus requires a positive record and non-negative negatives");
+    }
     SplittableRandom random = new SplittableRandom(CORPUS_SEED);
     Set<String> uniqueValues = new HashSet<>();
-    List<Fixture> fixtures = new ArrayList<>(RECORD_COUNT);
-    while (fixtures.size() < POSITIVE_RECORD_COUNT) {
+    List<Fixture> fixtures = new ArrayList<>(positiveCount + hardNegativeCount);
+    while (fixtures.size() < positiveCount) {
       String generated = randomValue(random);
       if (uniqueValues.add(generated)) {
         fixtures.add(new Fixture("entity-%04d".formatted(fixtures.size()), generated));
       }
     }
-    for (int index = 0; index < HARD_NEGATIVE_COUNT; index++) {
-      String prefix = fixtures.get(index).value().substring(0, 8);
+    for (int index = 0; index < hardNegativeCount; index++) {
+      String prefix = fixtures.get(index % positiveCount).value().substring(0, 8);
       String generated = prefix + randomValue(random).substring(8);
       if (uniqueValues.add(generated)) {
         fixtures.add(new Fixture("hard-negative-%04d".formatted(index), generated));
@@ -397,8 +405,15 @@ public final class FuzzySearchBenchmark {
   }
 
   static List<QueryCase> createQueries(List<Fixture> corpus) {
-    List<QueryCase> queries = new ArrayList<>(QUERY_COUNT);
-    for (int index = 0; index < QUERY_COUNT; index++) {
+    return createQueries(corpus, Math.min(QUERY_COUNT, corpus.size()));
+  }
+
+  static List<QueryCase> createQueries(List<Fixture> corpus, int queryCount) {
+    if (queryCount < 1 || queryCount > corpus.size()) {
+      throw new IllegalArgumentException("query count must be between 1 and corpus size");
+    }
+    List<QueryCase> queries = new ArrayList<>(queryCount);
+    for (int index = 0; index < queryCount; index++) {
       Fixture fixture = corpus.get(index);
       char original = fixture.value().charAt(8);
       char replacement = original == 'a' ? 'b' : 'a';

@@ -253,7 +253,7 @@ final class PlaintextBenchmarkRunner {
     return score(canonicalQuery, candidates, normalizer);
   }
 
-  private static List<ScoredCandidate> score(
+  static List<ScoredCandidate> score(
       String canonicalQuery,
       List<PlaintextBenchmarkStore.PlaintextCandidate> candidates,
       CanonicalTextNormalizer normalizer) {
@@ -294,5 +294,5 @@ final class PlaintextBenchmarkRunner {
     return sorted.get(Math.max(0, index)) / 1_000_000.0;
   }
 
-  private record ScoredCandidate(String recordId, double score, int overlapCount) {}
+  record ScoredCandidate(String recordId, double score, int overlapCount) {}
 }
