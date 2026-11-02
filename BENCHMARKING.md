@@ -104,6 +104,29 @@ Initial v3.1 reports establish reproducible baselines and relative costs only. N
 
 The repository provides a deterministic synthetic benchmark runner in the PostgreSQL adapter test source set. Start the disposable Compose database, then run `./gradlew --no-daemon :postgres-adapter:fuzzySearchBenchmark`. The runner seeds 400 unique synthetic positive records and 200 prefix-sharing hard negatives from seed `20261019`, evaluates 300 single-substitution queries and 50 no-match queries, and excludes 30 warm-up searches from timed samples. It emits aggregate metrics and runtime/database metadata only; it does not print synthetic values or protected tokens. It reports retrieval recall/precision separately from final-match recall/precision, as well as index/token frequency, latency, throughput, and PostgreSQL relation sizes. These numbers are a local exploratory baseline, not a release threshold, production estimate, or security guarantee.
 
+The runner now executes both `EFS_FULL` and `PLAINTEXT_CONTROL` against the same generated corpus and held-out queries. Before emitting the plaintext results, it requires the ordered candidate IDs, final accepted IDs, and no-match outcomes to agree with EFS. The plaintext table is test-source-only and is cleared and reseeded on each run. The comparison records logical posting/payload bytes and physical PostgreSQL relation sizes separately; the two logical byte measures do not include object headers, indexes, or database page overhead.
+
+### Paired plaintext and EFS run (2026-11-02)
+
+Environment: JDK 25.0.4.1, PostgreSQL 18.6 in the local Compose service, macOS/aarch64, 12 reported processors, and a 9 GiB JVM maximum heap. Same deterministic 600-record corpus, 300 single-substitution queries, 50 no-match queries, candidate limit 100, and score threshold 0.80. One local, single-threaded run reported:
+
+| Measure | `PLAINTEXT_CONTROL` | `EFS_FULL` |
+| --- | ---: | ---: |
+| Candidate recall / precision | 1.000 / 0.010 | 1.000 / 0.010 |
+| Final recall / precision | 1.000 / 1.000 | 1.000 / 1.000 |
+| No-match false positives | 0/50 | 0/50 |
+| Candidate cap saturation | 300/300 | 300/300 |
+| Candidate retrieval latency, p50 / p95 / p99 | 8.077 / 12.647 / 16.204 ms | 8.024 / 10.478 / 12.876 ms |
+| Full search latency, p50 / p95 / p99 | 8.225 / 13.336 / 16.405 ms | 8.660 / 11.258 / 14.200 ms |
+| Full search throughput | 111.68 queries/s | 112.64 queries/s |
+| Indexing throughput | 101.46 records/s | 117.81 records/s |
+| Postings / distinct tokens | 20,256 / 6,859 raw | 20,256 / 6,859 protected |
+| Logical posting bytes | 59,710 raw token-value bytes | 788,784 protected-token bytes |
+| Logical payload bytes | 10,800 plaintext bytes | 30,000 ciphertext bytes |
+| PostgreSQL token / record relation sizes | 4,784,128 / 155,648 bytes | 6,848,512 / 253,952 bytes |
+
+This single local run does not show a stable latency penalty attributable to protection: the paired measurements are close and noisy, and the EFS and plaintext runs execute sequentially in one process. It does show greater logical token and relation storage for EFS in this fixture. Both modes saturated the candidate cap and had 1% candidate precision; the final scorer recovered all labeled targets for this narrow corpus. Treat these measurements as a reproducibility check, not a capacity, performance, or quality guarantee. Repeat with randomized run order, multiple forks/processes, representative deployment hardware, and approved workload thresholds before making performance claims.
+
 ### Recorded local run (2026-10-19)
 
 Environment: Gradle 9.8.1 wrapper, JDK 25.0.4.1, PostgreSQL 18.6 in digest-pinned Docker Compose, macOS 26.6.2 arm64, 12 reported processors, and a 9 GiB JVM maximum heap. The corpus contains 600 records (400 positives and 200 prefix-sharing hard negatives); 300 held-out single-substitution queries and 50 no-match queries; candidate limit 100; final similarity threshold 0.80. One single-threaded local run produced:
