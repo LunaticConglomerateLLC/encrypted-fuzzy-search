@@ -1,9 +1,9 @@
 package io.github.lunaticconglomeratellc.encryptedfuzzysearch.search;
 
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 
 /** Pair-local weighted Jaccard over Unicode character n-gram multisets. */
 public final class WeightedNgramScorer implements FinalScorer {
@@ -31,7 +31,7 @@ public final class WeightedNgramScorer implements FinalScorer {
     if (leftCounts.isEmpty() && rightCounts.isEmpty()) {
       return 1.0;
     }
-    Set<String> grams = new HashSet<>(leftCounts.keySet());
+    Set<String> grams = new TreeSet<>(leftCounts.keySet());
     grams.addAll(rightCounts.keySet());
     double intersection = 0.0;
     double union = 0.0;

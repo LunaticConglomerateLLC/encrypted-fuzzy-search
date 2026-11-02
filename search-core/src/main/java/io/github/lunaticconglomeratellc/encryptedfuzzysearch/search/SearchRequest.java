@@ -1,6 +1,7 @@
 package io.github.lunaticconglomeratellc.encryptedfuzzysearch.search;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /** Validated caller request for an accuracy-contract search. */
 public record SearchRequest(
@@ -12,7 +13,8 @@ public record SearchRequest(
     int candidateLimit,
     double minimumSimilarity,
     SearchExpansionOptions expansions,
-    FinalScorer finalScorer) {
+    FinalScorer finalScorer,
+    Optional<IsotonicScoreCalibrator> calibrationModel) {
   public SearchRequest {
     requireIdentifier(tenantId, "tenantId");
     requireIdentifier(fieldId, "fieldId");
@@ -21,6 +23,7 @@ public record SearchRequest(
     Objects.requireNonNull(accuracyContract, "accuracyContract");
     Objects.requireNonNull(expansions, "expansions");
     Objects.requireNonNull(finalScorer, "finalScorer");
+    Objects.requireNonNull(calibrationModel, "calibrationModel");
     if (candidateLimit < 1 || candidateLimit > EncryptedFuzzySearchService.MAX_CANDIDATE_LIMIT) {
       throw new IllegalArgumentException(
           "candidateLimit must be between 1 and "
@@ -52,7 +55,8 @@ public record SearchRequest(
         candidateLimit,
         minimumSimilarity,
         SearchExpansionOptions.none(),
-        new CodePointLevenshteinScorer());
+        new CodePointLevenshteinScorer(),
+        Optional.empty());
   }
 
   public SearchRequest(
@@ -73,7 +77,31 @@ public record SearchRequest(
         candidateLimit,
         minimumSimilarity,
         expansions,
-        new CodePointLevenshteinScorer());
+        new CodePointLevenshteinScorer(),
+        Optional.empty());
+  }
+
+  public SearchRequest(
+      String tenantId,
+      String fieldId,
+      String keyId,
+      String query,
+      SearchAccuracyContract accuracyContract,
+      int candidateLimit,
+      double minimumSimilarity,
+      SearchExpansionOptions expansions,
+      FinalScorer finalScorer) {
+    this(
+        tenantId,
+        fieldId,
+        keyId,
+        query,
+        accuracyContract,
+        candidateLimit,
+        minimumSimilarity,
+        expansions,
+        finalScorer,
+        Optional.empty());
   }
 
   public static SearchRequest exact(
@@ -128,7 +156,8 @@ public record SearchRequest(
         candidateLimit,
         minimumSimilarity,
         expansions,
-        finalScorer);
+        finalScorer,
+        calibrationModel);
   }
 
   /** Returns an otherwise identical request using a built-in final-scoring profile. */
@@ -142,7 +171,23 @@ public record SearchRequest(
         candidateLimit,
         minimumSimilarity,
         expansions,
-        finalScorer);
+        finalScorer,
+        calibrationModel);
+  }
+
+  /** Returns a request whose output scores use the explicitly supplied fitted model. */
+  public SearchRequest withCalibration(IsotonicScoreCalibrator calibrationModel) {
+    return new SearchRequest(
+        tenantId,
+        fieldId,
+        keyId,
+        query,
+        accuracyContract,
+        candidateLimit,
+        minimumSimilarity,
+        expansions,
+        finalScorer,
+        Optional.of(Objects.requireNonNull(calibrationModel, "calibrationModel")));
   }
 
   /** Prevent accidental logging of plaintext query and alias text from this request. */
@@ -152,6 +197,8 @@ public record SearchRequest(
         + accuracyContract.mode()
         + ", scorer="
         + finalScorer.id()
+        + ", calibrationModel="
+        + calibrationModel.map(IsotonicScoreCalibrator::modelId).orElse("none")
         + ", candidateLimit="
         + candidateLimit
         + ", expansions=<redacted>]";

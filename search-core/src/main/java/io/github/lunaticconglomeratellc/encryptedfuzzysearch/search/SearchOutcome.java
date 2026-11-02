@@ -12,7 +12,8 @@ public record SearchOutcome(
     int candidatesVerified,
     List<String> strategyIds,
     List<ExpansionProvenance> expansions,
-    String scoringProfileId) {
+    String scoringProfileId,
+    java.util.Optional<String> calibrationModelId) {
   public SearchOutcome {
     matches = List.copyOf(Objects.requireNonNull(matches, "matches"));
     Objects.requireNonNull(accuracyContract, "accuracyContract");
@@ -20,9 +21,16 @@ public record SearchOutcome(
     strategyIds = List.copyOf(Objects.requireNonNull(strategyIds, "strategyIds"));
     expansions = List.copyOf(Objects.requireNonNull(expansions, "expansions"));
     Objects.requireNonNull(scoringProfileId, "scoringProfileId");
+    Objects.requireNonNull(calibrationModelId, "calibrationModelId");
     if (scoringProfileId.isBlank()) {
       throw new IllegalArgumentException("scoringProfileId must not be blank");
     }
+    calibrationModelId.ifPresent(
+        id -> {
+          if (id.isBlank()) {
+            throw new IllegalArgumentException("calibration model ID must not be blank");
+          }
+        });
     if (candidatesVerified < 0) {
       throw new IllegalArgumentException("candidatesVerified must not be negative");
     }
@@ -46,7 +54,8 @@ public record SearchOutcome(
         candidatesVerified,
         strategyIds,
         List.of(),
-        CodePointLevenshteinScorer.ID);
+        CodePointLevenshteinScorer.ID,
+        java.util.Optional.empty());
   }
 
   public SearchOutcome(
@@ -65,7 +74,33 @@ public record SearchOutcome(
         candidatesVerified,
         strategyIds,
         expansions,
-        CodePointLevenshteinScorer.ID);
+        CodePointLevenshteinScorer.ID,
+        java.util.Optional.empty());
+  }
+
+  public SearchOutcome(
+      List<FuzzySearchResult> matches,
+      SearchAccuracyContract accuracyContract,
+      CandidateCompleteness candidateCompleteness,
+      boolean candidateLimitExceeded,
+      int candidatesVerified,
+      List<String> strategyIds,
+      List<ExpansionProvenance> expansions,
+      String scoringProfileId) {
+    this(
+        matches,
+        accuracyContract,
+        candidateCompleteness,
+        candidateLimitExceeded,
+        candidatesVerified,
+        strategyIds,
+        expansions,
+        scoringProfileId,
+        java.util.Optional.empty());
+  }
+
+  public boolean calibrated() {
+    return calibrationModelId.isPresent();
   }
 
   /**

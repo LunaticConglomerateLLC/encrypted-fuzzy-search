@@ -2,11 +2,12 @@ package io.github.lunaticconglomeratellc.encryptedfuzzysearch.search;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 
 /** Soft TF-IDF with candidate-local document frequencies and one-to-one fuzzy token matches. */
 public final class SoftTfIdfScorer implements FinalScorer {
@@ -69,7 +70,7 @@ public final class SoftTfIdfScorer implements FinalScorer {
         throw new IllegalArgumentException(
             "Soft TF-IDF candidate set exceeds the token work limit");
       }
-      new HashSet<>(terms.keySet()).forEach(term -> documentFrequency.merge(term, 1, Integer::sum));
+      terms.keySet().forEach(term -> documentFrequency.merge(term, 1, Integer::sum));
     }
     if (queryTerms.isEmpty()) {
       return documents.stream().map(doc -> doc.isEmpty() ? 1.0 : 0.0).toList();
@@ -77,7 +78,7 @@ public final class SoftTfIdfScorer implements FinalScorer {
     List<Double> scores = new ArrayList<>(documents.size());
     long comparisons = 0;
     for (Map<String, Integer> document : documents) {
-      Set<String> available = new HashSet<>(document.keySet());
+      Set<String> available = new LinkedHashSet<>(new TreeSet<>(document.keySet()));
       double numerator = 0.0;
       double denominator = 0.0;
       for (Map.Entry<String, Integer> queryTerm : queryTerms.entrySet()) {

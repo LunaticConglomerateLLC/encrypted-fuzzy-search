@@ -95,6 +95,12 @@ public class ExperimentalScorerTest {
     assertTrue(scores.get(0) > 0.0);
     assertEquals(scores.get(1), 1.0);
     assertEquals(scores.get(2), 0.0);
+    assertEquals(
+        scorer.scoreCandidates(
+            List.of("smith alice"),
+            List.of(
+                List.of("smyth alice"), List.of("smith alice smith alice"), List.of("jones bob"))),
+        scores);
     assertEquals(scorer.score("", ""), 1.0);
     assertThrows(IllegalArgumentException.class, () -> new SoftTfIdfScorer(Double.NaN));
     assertThrows(IllegalArgumentException.class, () -> new SoftTfIdfScorer(1.1));

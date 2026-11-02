@@ -88,6 +88,50 @@ public class EncryptedFuzzySearchServiceTest {
   }
 
   @Test
+  public void calibratedScoresRequireModelPolicyAndAreReportedOnOutcome() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    IsotonicScoreCalibrator model = calibrationModel();
+    EncryptedFuzzySearchService defaultService = service(new AtomicInteger(), repository);
+    SearchRequest request =
+        SearchRequest.approximate("tenant-a", "name", "key-v1", "Marta Smith", 10, 0.5)
+            .withScorer(new TokenSetScorer())
+            .withCalibration(model);
+    assertThrows(IllegalArgumentException.class, () -> defaultService.search(request));
+    assertEquals(repository.findCandidateCalls, 0);
+
+    SearchPolicy policy =
+        expansionPolicy(false, Set.of())
+            .allowingScorers(Set.of(TokenSetScorer.ID))
+            .allowingCalibrationModels(Set.of(model.modelId()));
+    EncryptedFuzzySearchService service = serviceWithPolicy(repository, policy);
+    service.indexValue("tenant-a", "name", "full", "key-v1", "Marta Smith");
+    service.indexValue("tenant-a", "name", "partial", "key-v1", "Marta Jones");
+
+    SearchOutcome outcome = service.search(request);
+
+    assertEquals(
+        outcome.matches().stream().map(FuzzySearchResult::recordId).toList(), List.of("full"));
+    assertEquals(outcome.matches().getFirst().similarity(), 1.0);
+    assertTrue(outcome.calibrated());
+    assertEquals(outcome.calibrationModelId().orElseThrow(), model.modelId());
+    assertEquals(outcome.scoringProfileId(), TokenSetScorer.ID);
+  }
+
+  @Test
+  public void exactModeRejectsCalibrationEvenWhenModelIsAllowlisted() {
+    IsotonicScoreCalibrator model = calibrationModel();
+    SearchPolicy policy =
+        expansionPolicy(false, Set.of()).allowingCalibrationModels(Set.of(model.modelId()));
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service = serviceWithPolicy(repository, policy);
+    SearchRequest request =
+        SearchRequest.exact("tenant-a", "name", "key-v1", "Marta Smith", 10).withCalibration(model);
+
+    assertThrows(IllegalArgumentException.class, () -> service.search(request));
+    assertEquals(repository.findCandidateCalls, 0);
+  }
+
+  @Test
   public void rejectsDuplicateStrategyNamespaces() {
     ProtectedIndexStrategy bigrams = new ProtectedNgramStrategy(2, new NgramBlindIndexer());
 
@@ -740,6 +784,18 @@ public class EncryptedFuzzySearchServiceTest {
         new ProtectedNgramStrategy(2, new NgramBlindIndexer()),
         new ProtectedNgramStrategy(3, new NgramBlindIndexer()),
         repository);
+  }
+
+  private static IsotonicScoreCalibrator calibrationModel() {
+    List<Double> scores = new ArrayList<>();
+    List<Boolean> labels = new ArrayList<>();
+    for (int index = 0; index < 10; index++) {
+      scores.add(index * 0.05);
+      labels.add(false);
+      scores.add(0.55 + index * 0.05);
+      labels.add(true);
+    }
+    return IsotonicScoreCalibrator.fit("service-calibration-v1", scores, labels);
   }
 
   private static SearchPolicy explicitPolicy(List<? extends ProtectedIndexStrategy> strategies) {

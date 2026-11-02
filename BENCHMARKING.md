@@ -145,3 +145,21 @@ Interpretation remains unchanged: the candidate limit saturated for every typo q
 | Candidate-local Soft TF-IDF | 1.0000 | 4/4 |
 
 This fixture shows that token-aware profiles rank its reordered and typo cases well; it does not establish general accuracy gains. Four examples are too few to tune or select a production scorer. The weighted edit profile uses only the listed caller-supplied OCR costs, so it does not improve the transposition case. The BM25 profile uses term statistics from the four candidates only. These final scoring differences do not alter candidate generation: the separate recorded PostgreSQL baseline still has 1% candidate precision and saturates the 100-candidate cap for every typo query. Use larger entity-disjoint held-out fixtures before drawing broader conclusions or changing defaults.
+
+### v0.2 PostgreSQL candidate-set scorer comparison (2026-11-02)
+
+The PostgreSQL benchmark runner now also applies each scorer to the same v0.2 candidate-generation workload and reports `final_recall`, `final_precision`, MRR, top-1 count, and no-match false positives per profile. This was run with JDK 25.0.4.1 and PostgreSQL 18.6 on the deterministic 600-record corpus, 300 single-substitution queries, candidate limit 100, and score threshold 0.80. Candidate recall remained 1.000 and candidate precision 0.010 for every profile because the scoring stage does not change retrieval.
+
+| Final scorer | Final recall | Final precision | MRR | Top-1 | No-match FP |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Code-point Levenshtein | 1.000 | 1.000 | 1.000 | 300/300 | 0/50 |
+| Damerau-Levenshtein (OSA) | 1.000 | 1.000 | 1.000 | 300/300 | 0/50 |
+| Weighted edit (configured OCR costs) | 1.000 | 1.000 | 1.000 | 300/300 | 0/50 |
+| Pair-local weighted character bigrams | 0.020 | 1.000 | 0.020 | 6/300 | 0/50 |
+| Token-set Jaccard | 0.000 | undefined (no accepted results) | 0.000 | 0/300 | 0/50 |
+| Candidate-local BM25 | 0.000 | undefined (no accepted results) | 0.000 | 0/300 | 0/50 |
+| Candidate-local Soft TF-IDF | 1.000 | 1.000 | 1.000 | 300/300 | 0/50 |
+
+This fixture contains one continuous random code-point token per record and only single substitutions. It therefore does not exercise token order, multiple terms, OCR confusions, or adjacent transpositions. The zero-result token-set/BM25 precision is undefined, not zero. Weighted bigrams rejected most relevant candidates at threshold `0.80`; candidate retrieval itself still included them. Soft TF-IDF handled this single-token typo workload, while the small name-like fixture above favors token-aware profiles on different transformations. These results show dataset dependence and are exploratory; they do not justify changing the default scorer or establish general quality.
+
+The isotonic-calibration sanity test fits 20 synthetic score/label pairs (10 per class) and evaluates four separate synthetic held-out examples. On that deliberately separable fixture it reports Brier score `0.0000` and expected calibration error `0.0000`. This checks model fitting and metric calculation only; four held-out cases do not support a real-world confidence claim or production calibration.

@@ -24,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import javax.crypto.SecretKey;
 
@@ -303,6 +304,16 @@ public final class EncryptedFuzzySearchService {
         && !CodePointLevenshteinScorer.ID.equals(request.finalScorer().id())) {
       throw new IllegalArgumentException("exact mode requires the Levenshtein scoring profile");
     }
+    Optional<IsotonicScoreCalibrator> calibrationModel = request.calibrationModel();
+    if (calibrationModel.isPresent()
+        && !searchPolicy.allowsCalibrationModel(calibrationModel.orElseThrow().modelId())) {
+      throw new IllegalArgumentException(
+          "search policy does not allow calibration model "
+              + calibrationModel.orElseThrow().modelId());
+    }
+    if (request.accuracyContract().mode() == SearchMode.EXACT && calibrationModel.isPresent()) {
+      throw new IllegalArgumentException("exact mode does not support score calibration");
+    }
     SearchExpansionOptions expansions = request.expansions();
     if (!expansions.aliases().isEmpty() && !searchPolicy.aliasesAllowed()) {
       throw new IllegalArgumentException("search policy does not allow known aliases");
@@ -386,14 +397,18 @@ public final class EncryptedFuzzySearchService {
         }
       }
     }
-    List<Double> similarityScores =
+    List<Double> scorerScores =
         request
             .finalScorer()
             .scoreCandidates(
                 queryForms, verifiedCandidates.stream().map(VerifiedCandidate::forms).toList());
-    if (similarityScores.size() != verifiedCandidates.size()) {
+    if (scorerScores.size() != verifiedCandidates.size()) {
       throw new IllegalStateException("scorer returned the wrong number of candidate scores");
     }
+    List<Double> similarityScores =
+        calibrationModel
+            .map(model -> scorerScores.stream().map(model::calibrate).toList())
+            .orElse(scorerScores);
     List<FuzzySearchResult> matches = new ArrayList<>();
     for (int index = 0; index < verifiedCandidates.size(); index++) {
       VerifiedCandidate candidate = verifiedCandidates.get(index);
@@ -417,7 +432,8 @@ public final class EncryptedFuzzySearchService {
         candidatesToVerify.size(),
         plan.strategyIds(),
         expansionProvenance,
-        request.finalScorer().id());
+        request.finalScorer().id(),
+        calibrationModel.map(IsotonicScoreCalibrator::modelId));
   }
 
   /** Searches a field whose values were indexed with the same explicit transform profile. */
