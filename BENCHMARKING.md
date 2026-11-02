@@ -2,6 +2,16 @@
 
 **Status:** methodology and exploratory baseline runner. No accuracy/latency thresholds or service-level objectives have been approved.
 
+## Automated pull-request and published reporting
+
+Every non-draft pull request runs the same PostgreSQL load profile twice against the target branch commit and twice against the proposed commit on the same GitHub-hosted runner. Each revision gets a fresh disposable PostgreSQL database. The generated aggregate reports are checked for matching corpus, workload, Java runtime, host, and PostgreSQL settings, then averaged and compared for throughput, warm latency percentiles, final correctness, failures/timeouts, indexing rate, and PostgreSQL relation sizes. The report appears in the Actions run summary and as an updated pull request comment; the machine-readable comparison is retained as a workflow artifact.
+
+These measurements are informational. The runner and workload are not an owner-approved production reference profile, so no percentage or latency threshold blocks merging. Review a change in context and repeat it under a controlled representative environment before treating a single noisy run as a regression.
+
+To ensure the report finishes before a pull request can merge, a repository maintainer should require the **Compare performance with the target branch** check in the branch protection rule or ruleset for the target branch. This requires the report to exist before merge but does not block on a performance delta; reviewers decide whether to fix the observed impact.
+
+After each push to `main`, the documentation workflow runs a longer paired load profile against that merged revision and publishes the aggregate JSON with a static performance page. To activate the deployment, a repository maintainer must open **Settings → Pages**, set **Build and deployment → Source** to **GitHub Actions**, and ensure the `github-pages` deployment environment is allowed. The site is then available at the repository's GitHub Pages URL. The published report includes generated synthetic aggregates and runtime metadata only; it excludes fixture values, protected tokens, and keys.
+
 ## Goals and comparison boundary
 
 Measure candidate retrieval separately from authorized final verification. Candidate retrieval is the protected-index stage: its purpose is to include relevant records while controlling candidate volume. Final verification applies the configured similarity/scoring logic to authorized candidates. Report both stages so high final-match quality cannot conceal poor candidate recall, and a broad candidate set cannot appear accurate only because final verification filters it.

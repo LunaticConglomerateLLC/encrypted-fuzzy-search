@@ -28,6 +28,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
+      - name: Test benchmark comparison and documentation helpers
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Build, format, test, and verify coverage
         run: ./gradlew --no-daemon clean check
       - name: Run synthetic benchmark harness smoke (no timing gate)

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Encrypted Fuzzy Search documentation and measured performance data.">
+  <title>Encrypted Fuzzy Search — Performance</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.55 system-ui, sans-serif; color: #172033; background: #f6f8fb; }
+    body { max-width: 1100px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    header, section { background: white; border: 1px solid #dce3ed; border-radius: 12px; padding: 1.4rem; margin: 1rem 0; }
+    h1, h2 { line-height: 1.2; } h1 { margin-top: 0; }
+    .muted { color: #526176; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: right; padding: .6rem; border-bottom: 1px solid #e5eaf1; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    code { background: #eef2f7; padding: .1rem .3rem; border-radius: 4px; }
+    a { color: #1457b8; }
+    .status { padding: .75rem; background: #f2f5f9; border-radius: 8px; }
+    @media (max-width: 640px) { body { padding: 1rem .65rem 2rem; } header, section { padding: 1rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Encrypted Fuzzy Search</h1>
+    <p>Performance documentation</p>
+    <p class="muted">A repeatable synthetic PostgreSQL workload compares full encrypted fuzzy search with a plaintext control. Results are measurements for the recorded runner and configuration, not service guarantees.</p>
+  </header>
+  <main>
+    <section aria-labelledby="latest-heading">
+      <h2 id="latest-heading">Latest merged revision</h2>
+      <p id="run-status" class="status" role="status">Loading the latest benchmark report…</p>
+      <div id="results" class="table-wrap"></div>
+      <p id="metadata" class="muted"></p>
+    </section>
+    <section aria-labelledby="interpretation-heading">
+      <h2 id="interpretation-heading">How to read these results</h2>
+      <p>The report compares the same generated records and query workload in <code>EFS_FULL</code> and <code>PLAINTEXT_CONTROL</code> modes. It includes throughput, warm latency percentiles, correctness, failures and timeouts, indexing rate, relation sizes, JVM/runtime, PostgreSQL, host, and workload metadata.</p>
+      <p>Measurements are informational. No latency, throughput, or encryption-overhead threshold has been approved. A single run can vary with runner scheduling, JVM behavior, and database state; compare repeated runs before drawing conclusions.</p>
+      <p><a href="benchmarking.html">Read the benchmark methodology and limitations</a> · <a href="data/latest.json">Download the machine-readable report</a> · <a href="https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search">Source repository</a></p>
+    </section>
+  </main>
+  <script>
+    const columns = [
+      ['completed_throughput_qps', 'Throughput (queries/s)', 2],
+      ['warm_latency_ms_p50', 'Warm p50 (ms)', 3],
+      ['warm_latency_ms_p95', 'Warm p95 (ms)', 3],
+      ['warm_latency_ms_p99', 'Warm p99 (ms)', 3],
+      ['final_recall', 'Final recall', 4],
+      ['final_precision', 'Final precision', 4],
+      ['no_match_false_positive_rate', 'No-match false-positive rate', 4],
+      ['failures', 'Failures', 0],
+      ['timeouts', 'Timeouts', 0],
+      ['index_records_per_second', 'Indexing (records/s)', 2],
+      ['postgres_token_relation_bytes', 'Token relation (bytes)', 0],
+      ['postgres_record_relation_bytes', 'Record relation (bytes)', 0],
+    ];
+    const escapeText = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    fetch('data/latest.json', {cache: 'no-store'}).then(response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    }).then(report => {
+      if (report.schema !== 'efs.benchmark-report.v1' || !Array.isArray(report.results)) throw new Error('Unsupported benchmark report.');
+      const head = `<table><thead><tr><th>Measure</th>${report.results.map(row => `<th>${escapeText(row.mode)}</th>`).join('')}</tr></thead><tbody>`;
+      const body = columns.map(([key, label, digits]) => `<tr><td>${escapeText(label)}</td>${report.results.map(row => `<td>${Number(row[key]).toFixed(digits)}</td>`).join('')}</tr>`).join('');
+      document.getElementById('results').innerHTML = `${head}${body}</tbody></table>`;
+      const source = escapeText(report.source_revision);
+      const commitUrl = `https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/commit/${encodeURIComponent(report.source_revision)}`;
+      const corpus = report.corpus;
+      const workload = report.workload;
+      document.getElementById('metadata').innerHTML = `Generated ${escapeText(report.generated_at_utc)} · revision <a href="${commitUrl}"><code>${source.slice(0, 12)}</code></a> · ${escapeText(corpus.record_count)} records · ${escapeText(workload.concurrency)} workers · ${escapeText(workload.duration_seconds)} seconds per mode · candidate limit ${escapeText(workload.candidate_limit)} · ${escapeText(report.environment.java_version)} / PostgreSQL ${escapeText(report.results[0].postgres_version)}`;
+      document.getElementById('run-status').textContent = report.source_tree_dirty ? 'This report was generated from a dirty source tree.' : 'Latest completed run; synthetic data only.';
+    }).catch(error => {
+      document.getElementById('run-status').textContent = `No published benchmark report is available yet (${error.message}).`;
+    });
+  </script>
+</body>
+</html>

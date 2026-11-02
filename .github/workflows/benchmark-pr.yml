@@ -1,0 +1,104 @@
+name: PR performance benchmark
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: pr-performance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Compare performance with the target branch
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target branch revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: baseline
+      - name: Check out pull request revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+      - name: Start isolated PostgreSQL for baseline run
+        working-directory: baseline
+        run: docker compose -f compose.test.yaml up --detach --wait --wait-timeout 60
+      - name: Measure target branch
+        working-directory: baseline
+        env:
+          EFS_BENCHMARK_REPORT_FILE: ${{ github.workspace }}/baseline-report-1.json
+        run: >-
+          ./gradlew --no-daemon :postgres-adapter:postgresLoadBenchmark
+          --args='--records=600 --candidate-limit=100 --concurrency=4
+          --duration-seconds=10 --warmup-seconds=2 --no-match-percent=10
+          --request-timeout-ms=30000'
+      - name: Repeat target branch measurement
+        working-directory: baseline
+        env:
+          EFS_BENCHMARK_REPORT_FILE: ${{ github.workspace }}/baseline-report-2.json
+        run: >-
+          ./gradlew --no-daemon :postgres-adapter:postgresLoadBenchmark
+          --args='--records=600 --candidate-limit=100 --concurrency=4
+          --duration-seconds=10 --warmup-seconds=2 --no-match-percent=10
+          --request-timeout-ms=30000'
+      - name: Reset PostgreSQL between revisions
+        if: always()
+        working-directory: baseline
+        run: docker compose -f compose.test.yaml down --volumes --remove-orphans
+      - name: Start isolated PostgreSQL for pull request run
+        working-directory: candidate
+        run: docker compose -f compose.test.yaml up --detach --wait --wait-timeout 60
+      - name: Measure pull request
+        working-directory: candidate
+        env:
+          EFS_BENCHMARK_REPORT_FILE: ${{ github.workspace }}/candidate-report-1.json
+        run: >-
+          ./gradlew --no-daemon :postgres-adapter:postgresLoadBenchmark
+          --args='--records=600 --candidate-limit=100 --concurrency=4
+          --duration-seconds=10 --warmup-seconds=2 --no-match-percent=10
+          --request-timeout-ms=30000'
+      - name: Repeat pull request measurement
+        working-directory: candidate
+        env:
+          EFS_BENCHMARK_REPORT_FILE: ${{ github.workspace }}/candidate-report-2.json
+        run: >-
+          ./gradlew --no-daemon :postgres-adapter:postgresLoadBenchmark
+          --args='--records=600 --candidate-limit=100 --concurrency=4
+          --duration-seconds=10 --warmup-seconds=2 --no-match-percent=10
+          --request-timeout-ms=30000'
+      - name: Stop disposable PostgreSQL database
+        if: always()
+        working-directory: candidate
+        run: docker compose -f compose.test.yaml down --volumes --remove-orphans
+      - name: Compare aggregate reports
+        run: >-
+          python3 candidate/scripts/compare_benchmarks.py
+          --baseline baseline-report-1.json --baseline baseline-report-2.json
+          --candidate candidate-report-1.json --candidate candidate-report-2.json
+          --expected-baseline-revision '${{ github.event.pull_request.base.sha }}'
+          --expected-candidate-revision '${{ github.event.pull_request.head.sha }}'
+          --json-out comparison/comparison.json --markdown-out comparison/summary.md
+      - name: Add comparison to the Actions run summary
+        if: always() && hashFiles('comparison/summary.md') != ''
+        run: cat comparison/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload PR comparison for the reporter workflow
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-performance-comparison
+          path: comparison/comparison.json
+          retention-days: 14
