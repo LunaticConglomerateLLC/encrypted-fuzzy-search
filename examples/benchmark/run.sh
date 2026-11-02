@@ -9,7 +9,7 @@ concurrency="${EFS_BENCHMARK_CONCURRENCY:-4}"
 duration_seconds="${EFS_BENCHMARK_DURATION_SECONDS:-10}"
 warmup_seconds="${EFS_BENCHMARK_WARMUP_SECONDS:-2}"
 no_match_percent="${EFS_BENCHMARK_NO_MATCH_PERCENT:-10}"
-request_timeout_ms="${EFS_BENCHMARK_REQUEST_TIMEOUT_MS:-5000}"
+request_timeout_ms="${EFS_BENCHMARK_REQUEST_TIMEOUT_MS:-30000}"
 
 cleanup() {
   docker compose -f "$compose_file" down

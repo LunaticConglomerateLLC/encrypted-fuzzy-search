@@ -34,6 +34,18 @@ public class ScoringBenchmark {
   @Param({"32", "128", "512"})
   public int textLength;
 
+  @Param({"20261102"})
+  public long seed;
+
+  @Param({"synthetic-lowercase-ascii-v1"})
+  public String inputGenerator;
+
+  @Param({"unknown"})
+  public String sourceRevision;
+
+  @Param({"unknown"})
+  public String sourceTreeDirty;
+
   @Param({"1", "10", "50"})
   public int candidateCount;
 
@@ -54,7 +66,7 @@ public class ScoringBenchmark {
 
   @Setup(Level.Trial)
   public void setup() {
-    SplittableRandom random = new SplittableRandom(20261102L + textLength);
+    SplittableRandom random = new SplittableRandom(seed + textLength);
     StringBuilder generated = new StringBuilder(textLength);
     for (int index = 0; index < textLength; index++) {
       generated.append((char) ('a' + random.nextInt(26)));

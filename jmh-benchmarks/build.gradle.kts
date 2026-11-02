@@ -21,5 +21,15 @@ tasks.register<JavaExec>("jmh") {
     args = listOf("-rf", "json", "-rff", "build/reports/jmh/results.json")
     doFirst {
         layout.buildDirectory.dir("reports/jmh").get().asFile.mkdirs()
+        val sourceRevision =
+            providers.exec {
+                commandLine("git", "rev-parse", "HEAD")
+            }.standardOutput.asText.get().trim()
+        val sourceTreeDirty =
+            providers.exec {
+                commandLine("git", "status", "--porcelain", "--untracked-files=no")
+            }.standardOutput.asText.get().trim().isNotEmpty()
+        args("-p", "sourceRevision=${sourceRevision.ifEmpty { "unknown" }}")
+        args("-p", "sourceTreeDirty=$sourceTreeDirty")
     }
 }

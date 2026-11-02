@@ -21,7 +21,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +53,7 @@ public final class PostgresLoadBenchmark {
     repository.initializeSchema();
     PlaintextBenchmarkStore plaintextStore = new PlaintextBenchmarkStore(dataSource);
     plaintextStore.initializeSchema();
+    List<Map<String, Object>> modeReports = new ArrayList<>();
 
     byte[] rootBytes = new byte[32];
     Arrays.fill(rootBytes, (byte) 0x27);
@@ -84,30 +87,44 @@ public final class PostgresLoadBenchmark {
             FuzzySearchBenchmark.KEY_ID,
             fixture.value());
       }
-      reportMode(
-          EFS,
-          profile,
-          corpus,
-          queries,
-          dataSource,
-          started,
-          query -> {
-            SearchOutcome outcome =
-                service.search(
-                    SearchRequest.approximate(
-                        FuzzySearchBenchmark.TENANT_ID,
-                        FuzzySearchBenchmark.FIELD_ID,
-                        FuzzySearchBenchmark.KEY_ID,
-                        query,
-                        profile.candidateLimit(),
-                        FuzzySearchBenchmark.MINIMUM_SIMILARITY));
-            return new SearchResult(
-                outcome.candidatesVerified(),
-                outcome.candidatesVerified() >= profile.candidateLimit(),
-                outcome.matches().size());
-          },
-          "efs_protected_tokens",
-          "efs_encrypted_records");
+      modeReports.add(
+          reportMode(
+              EFS,
+              profile,
+              corpus,
+              queries,
+              dataSource,
+              started,
+              workload -> {
+                SearchOutcome outcome =
+                    service.search(
+                        SearchRequest.approximate(
+                            FuzzySearchBenchmark.TENANT_ID,
+                            FuzzySearchBenchmark.FIELD_ID,
+                            FuzzySearchBenchmark.KEY_ID,
+                            workload.query(),
+                            profile.candidateLimit(),
+                            FuzzySearchBenchmark.MINIMUM_SIMILARITY));
+                boolean targetFound =
+                    outcome.matches().stream()
+                        .anyMatch(match -> match.recordId().equals(workload.expectedId()));
+                int falseMatches =
+                    workload.noMatch()
+                        ? outcome.matches().size()
+                        : (int)
+                            outcome.matches().stream()
+                                .filter(match -> !match.recordId().equals(workload.expectedId()))
+                                .count();
+                return new SearchResult(
+                    outcome.candidatesVerified(),
+                    outcome.candidatesVerified() >= profile.candidateLimit(),
+                    targetFound,
+                    falseMatches,
+                    workload.noMatch(),
+                    workload.noMatch() && !outcome.matches().isEmpty());
+              },
+              "efs_protected_tokens",
+              "efs_encrypted_records"));
     }
 
     if (profile.mode().equals("both") || profile.mode().equalsIgnoreCase(PLAINTEXT)) {
@@ -122,33 +139,87 @@ public final class PostgresLoadBenchmark {
             FuzzySearchBenchmark.KEY_ID,
             normalizer.normalize(fixture.value()));
       }
-      reportMode(
-          PLAINTEXT,
-          profile,
-          corpus,
-          queries,
-          dataSource,
-          started,
-          query -> {
-            String canonical = normalizer.normalize(query);
-            List<PlaintextBenchmarkStore.PlaintextCandidate> candidates =
-                plaintextStore.findCandidates(
-                    FuzzySearchBenchmark.TENANT_ID,
-                    FuzzySearchBenchmark.FIELD_ID,
-                    FuzzySearchBenchmark.KEY_ID,
-                    PlaintextBenchmarkStore.createTokens(canonical),
-                    profile.candidateLimit());
-            List<PlaintextBenchmarkRunner.ScoredCandidate> accepted =
-                PlaintextBenchmarkRunner.score(canonical, candidates, normalizer);
-            return new SearchResult(
-                candidates.size(), candidates.size() >= profile.candidateLimit(), accepted.size());
-          },
-          PlaintextBenchmarkStore.TOKEN_TABLE,
-          PlaintextBenchmarkStore.RECORD_TABLE);
+      modeReports.add(
+          reportMode(
+              PLAINTEXT,
+              profile,
+              corpus,
+              queries,
+              dataSource,
+              started,
+              workload -> {
+                String canonical = normalizer.normalize(workload.query());
+                List<PlaintextBenchmarkStore.PlaintextCandidate> candidates =
+                    plaintextStore.findCandidates(
+                        FuzzySearchBenchmark.TENANT_ID,
+                        FuzzySearchBenchmark.FIELD_ID,
+                        FuzzySearchBenchmark.KEY_ID,
+                        PlaintextBenchmarkStore.createTokens(canonical),
+                        profile.candidateLimit());
+                List<PlaintextBenchmarkRunner.ScoredCandidate> accepted =
+                    PlaintextBenchmarkRunner.score(canonical, candidates, normalizer);
+                boolean targetFound =
+                    accepted.stream()
+                        .anyMatch(match -> match.recordId().equals(workload.expectedId()));
+                int falseMatches =
+                    workload.noMatch()
+                        ? accepted.size()
+                        : (int)
+                            accepted.stream()
+                                .filter(match -> !match.recordId().equals(workload.expectedId()))
+                                .count();
+                return new SearchResult(
+                    candidates.size(),
+                    candidates.size() >= profile.candidateLimit(),
+                    targetFound,
+                    falseMatches,
+                    workload.noMatch(),
+                    workload.noMatch() && !accepted.isEmpty());
+              },
+              PlaintextBenchmarkStore.TOKEN_TABLE,
+              PlaintextBenchmarkStore.RECORD_TABLE));
     }
+    Map<String, Object> report = new LinkedHashMap<>();
+    report.put("schema", "efs.benchmark-report.v1");
+    report.put("generated_at_utc", java.time.Instant.now().toString());
+    report.put("source_revision", BenchmarkReportWriter.sourceRevision());
+    report.put("source_tree_dirty", BenchmarkReportWriter.sourceDirty());
+    report.put(
+        "corpus",
+        Map.of(
+            "generator_id",
+            "synthetic-random-codepoints-v1",
+            "seed",
+            FuzzySearchBenchmark.CORPUS_SEED,
+            "record_count",
+            corpus.size(),
+            "labeled_query_count",
+            queries.size()));
+    report.put(
+        "workload",
+        Map.of(
+            "mode", profile.mode(),
+            "candidate_limit", profile.candidateLimit(),
+            "concurrency", profile.concurrency(),
+            "duration_seconds", profile.durationSeconds(),
+            "warmup_seconds", profile.warmupSeconds(),
+            "no_match_percent", profile.noMatchPercent(),
+            "request_timeout_ms", profile.requestTimeoutMillis()));
+    report.put(
+        "environment",
+        Map.of(
+            "java_version", System.getProperty("java.version"),
+            "java_vm", System.getProperty("java.vm.name"),
+            "os_name", System.getProperty("os.name"),
+            "os_version", System.getProperty("os.version"),
+            "architecture", System.getProperty("os.arch"),
+            "processors", Runtime.getRuntime().availableProcessors(),
+            "jvm_max_heap_bytes", Runtime.getRuntime().maxMemory()));
+    report.put("results", modeReports);
+    BenchmarkReportWriter.write(report);
   }
 
-  private static void reportMode(
+  private static Map<String, Object> reportMode(
       String mode,
       Profile profile,
       List<FuzzySearchBenchmark.Fixture> corpus,
@@ -161,8 +232,18 @@ public final class PostgresLoadBenchmark {
       throws Exception {
     long indexingNanos = System.nanoTime() - indexingStarted;
     long coldStarted = System.nanoTime();
-    operation.search(queries.get(0).value());
-    double coldMillis = (System.nanoTime() - coldStarted) / 1_000_000.0;
+    boolean coldSearchFailure = false;
+    boolean coldSearchTimeout = false;
+    try {
+      operation.search(
+          new SearchWorkload(queries.get(0).value(), queries.get(0).expectedId(), false));
+    } catch (SQLException failure) {
+      coldSearchFailure = true;
+      coldSearchTimeout = "57014".equals(failure.getSQLState());
+    } catch (Exception failure) {
+      coldSearchFailure = true;
+    }
+    Double coldMillis = coldSearchFailure ? null : (System.nanoTime() - coldStarted) / 1_000_000.0;
 
     long gcCountBefore = gcCount();
     long gcTimeBefore = gcTimeMillis();
@@ -216,7 +297,14 @@ public final class PostgresLoadBenchmark {
     System.out.println("os=" + System.getProperty("os.name") + "/" + System.getProperty("os.arch"));
     System.out.println("processors=" + Runtime.getRuntime().availableProcessors());
     System.out.println("jvm_max_heap_bytes=" + Runtime.getRuntime().maxMemory());
-    System.out.printf("cold_first_search_latency_ms=%.3f%n", coldMillis);
+    System.out.println(
+        "cold_first_search_latency_ms="
+            + (coldMillis == null ? "unavailable" : "%.3f".formatted(coldMillis)));
+    System.out.println(
+        "cold_first_search_failures="
+            + (coldSearchFailure ? 1 : 0)
+            + ", cold_first_search_timeouts="
+            + (coldSearchTimeout ? 1 : 0));
     System.out.printf(
         "index_records_per_second=%.2f%n", corpus.size() / (indexingNanos / 1_000_000_000.0));
     System.out.printf(
@@ -246,8 +334,18 @@ public final class PostgresLoadBenchmark {
         measured.saturated(),
         measured.completed());
     System.out.printf(
-        "matches_per_completed_search=%.3f%n",
-        measured.completed() == 0 ? 0.0 : (double) measured.matchTotal() / measured.completed());
+        "final_recall=%.4f (%d/%d)%n",
+        divideOrZero(measured.finalTruePositives(), measured.labeledQueries()),
+        measured.finalTruePositives(),
+        measured.labeledQueries());
+    System.out.printf(
+        "final_precision=%.4f; no_match_false_positive_rate=%.4f (%d/%d)%n",
+        divideOrZero(
+            measured.finalTruePositives(),
+            measured.finalTruePositives() + measured.finalFalsePositives()),
+        divideOrZero(measured.noMatchFalsePositives(), measured.noMatchQueries()),
+        measured.noMatchFalsePositives(),
+        measured.noMatchQueries());
     System.out.println(
         "indexing_mode=serial seed phase; warmup and measured searches run with fixed worker concurrency");
     System.out.println(
@@ -268,6 +366,67 @@ public final class PostgresLoadBenchmark {
             + recordRelationBytes);
     System.out.println(
         "privacy=synthetic-only disposable local database; no values, normalized forms, tokens, or keys are emitted");
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("mode", mode);
+    result.put("postgres_version", postgresVersion);
+    result.put(
+        "postgres_configuration",
+        Map.of(
+            "shared_buffers", postgresSharedBuffers,
+            "work_mem", postgresWorkMem,
+            "max_connections", postgresMaxConnections));
+    result.put("cold_first_search_latency_ms", coldMillis);
+    result.put("cold_first_search_failures", coldSearchFailure ? 1 : 0);
+    result.put("cold_first_search_timeouts", coldSearchTimeout ? 1 : 0);
+    result.put("index_records_per_second", corpus.size() / (indexingNanos / 1_000_000_000.0));
+    result.put("warm_latency_ms_p50", percentileMillis(measured.latenciesNanos(), 0.50));
+    result.put("warm_latency_ms_p95", percentileMillis(measured.latenciesNanos(), 0.95));
+    result.put("warm_latency_ms_p99", percentileMillis(measured.latenciesNanos(), 0.99));
+    result.put(
+        "completed_throughput_qps",
+        measured.elapsedSeconds() == 0.0 ? 0.0 : measured.completed() / measured.elapsedSeconds());
+    result.put("completed", measured.completed());
+    result.put("labeled_queries", measured.labeledQueries());
+    result.put("final_true_positives", measured.finalTruePositives());
+    result.put("final_false_positives", measured.finalFalsePositives());
+    result.put(
+        "final_recall", divideOrZero(measured.finalTruePositives(), measured.labeledQueries()));
+    result.put(
+        "final_precision",
+        divideOrZero(
+            measured.finalTruePositives(),
+            measured.finalTruePositives() + measured.finalFalsePositives()));
+    result.put("no_match_queries", measured.noMatchQueries());
+    result.put("no_match_false_positives", measured.noMatchFalsePositives());
+    result.put(
+        "no_match_false_positive_rate",
+        divideOrZero(measured.noMatchFalsePositives(), measured.noMatchQueries()));
+    result.put("failures", measured.failures());
+    result.put("timeouts", measured.timeouts());
+    result.put("completed_over_timeout_threshold", measured.overTimeout());
+    result.put(
+        "candidates_per_completed_search",
+        divideOrZero(measured.candidateTotal(), measured.completed()));
+    result.put("candidate_limit_saturated", measured.saturated());
+    result.put(
+        "candidate_limit_saturation_rate",
+        divideOrZero(measured.saturated(), measured.completed()));
+    result.put(
+        "matches_per_completed_search",
+        divideOrZero(
+            measured.finalTruePositives()
+                + measured.finalFalsePositives()
+                + measured.noMatchFalsePositives(),
+            measured.completed()));
+    result.put("jvm_used_heap_before_bytes", usedHeapBefore);
+    result.put("jvm_used_heap_after_bytes", usedHeapAfter);
+    result.put("gc_count_delta", gcCount);
+    result.put("gc_time_ms_delta", gcTime);
+    result.put("process_cpu_ms_delta", processCpuNanos / 1_000_000);
+    result.put("postgres_token_relation_bytes", tokenRelationBytes);
+    result.put("postgres_record_relation_bytes", recordRelationBytes);
+    result.put("synthetic_data_only", true);
+    return result;
   }
 
   private static PhaseResult runPhase(
@@ -298,7 +457,7 @@ public final class PostgresLoadBenchmark {
                   start.await();
                   long operationIndex = workerId;
                   while (System.nanoTime() < deadline[0]) {
-                    String query =
+                    SearchWorkload query =
                         nextQuery(queries, profile.noMatchPercent(), workerId, operationIndex++);
                     long operationStarted = System.nanoTime();
                     SearchResult result = operation.search(query);
@@ -306,7 +465,18 @@ public final class PostgresLoadBenchmark {
                     if (collect) {
                       workerStats.completed++;
                       workerStats.candidateTotal += result.candidateCount();
-                      workerStats.matchTotal += result.matchCount();
+                      if (result.noMatchQuery()) {
+                        workerStats.noMatchQueries++;
+                        if (result.noMatchFalsePositive()) {
+                          workerStats.noMatchFalsePositives++;
+                        }
+                      } else {
+                        workerStats.labeledQueries++;
+                        if (result.targetFound()) {
+                          workerStats.finalTruePositives++;
+                        }
+                        workerStats.finalFalsePositives += result.falseMatchCount();
+                      }
                       if (result.saturated()) {
                         workerStats.saturated++;
                       }
@@ -340,16 +510,17 @@ public final class PostgresLoadBenchmark {
     return PhaseResult.from(stats, elapsedNanos);
   }
 
-  private static String nextQuery(
+  private static SearchWorkload nextQuery(
       List<FuzzySearchBenchmark.QueryCase> queries,
       int noMatchPercent,
       int workerId,
       long operationIndex) {
     long mixedIndex = operationIndex + (workerId * 7L);
     if (Math.floorMod(mixedIndex, 100) < noMatchPercent) {
-      return "zzzzzzzzzz" + Math.floorMod(mixedIndex, 10_000);
+      return new SearchWorkload("zzzzzzzzzz" + Math.floorMod(mixedIndex, 10_000), null, true);
     }
-    return queries.get(Math.floorMod(mixedIndex, queries.size())).value();
+    FuzzySearchBenchmark.QueryCase query = queries.get(Math.floorMod(mixedIndex, queries.size()));
+    return new SearchWorkload(query.value(), query.expectedId(), false);
   }
 
   private static void truncate(PostgresTestDataSource dataSource, String table) throws Exception {
@@ -392,6 +563,10 @@ public final class PostgresLoadBenchmark {
     return runtime.totalMemory() - runtime.freeMemory();
   }
 
+  private static double divideOrZero(long numerator, long denominator) {
+    return denominator == 0 ? 0.0 : (double) numerator / denominator;
+  }
+
   private static long gcCount() {
     return ManagementFactory.getGarbageCollectorMXBeans().stream()
         .mapToLong(GarbageCollectorMXBean::getCollectionCount)
@@ -416,10 +591,18 @@ public final class PostgresLoadBenchmark {
 
   @FunctionalInterface
   private interface SearchOperation {
-    SearchResult search(String query) throws Exception;
+    SearchResult search(SearchWorkload query) throws Exception;
   }
 
-  private record SearchResult(int candidateCount, boolean saturated, int matchCount) {}
+  private record SearchWorkload(String query, String expectedId, boolean noMatch) {}
+
+  private record SearchResult(
+      int candidateCount,
+      boolean saturated,
+      boolean targetFound,
+      int falseMatchCount,
+      boolean noMatchQuery,
+      boolean noMatchFalsePositive) {}
 
   private record PhaseResult(
       long completed,
@@ -427,12 +610,16 @@ public final class PostgresLoadBenchmark {
       long timeouts,
       long overTimeout,
       long candidateTotal,
-      long matchTotal,
       long saturated,
+      long labeledQueries,
+      long finalTruePositives,
+      long finalFalsePositives,
+      long noMatchQueries,
+      long noMatchFalsePositives,
       List<Long> latenciesNanos,
       double elapsedSeconds) {
     static PhaseResult empty() {
-      return new PhaseResult(0, 0, 0, 0, 0, 0, 0, List.of(), 0.0);
+      return new PhaseResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of(), 0.0);
     }
 
     static PhaseResult from(List<WorkerStats> stats, long elapsedNanos) {
@@ -444,8 +631,12 @@ public final class PostgresLoadBenchmark {
           stats.stream().mapToLong(worker -> worker.timeouts).sum(),
           stats.stream().mapToLong(worker -> worker.overTimeout).sum(),
           stats.stream().mapToLong(worker -> worker.candidateTotal).sum(),
-          stats.stream().mapToLong(worker -> worker.matchTotal).sum(),
           stats.stream().mapToLong(worker -> worker.saturated).sum(),
+          stats.stream().mapToLong(worker -> worker.labeledQueries).sum(),
+          stats.stream().mapToLong(worker -> worker.finalTruePositives).sum(),
+          stats.stream().mapToLong(worker -> worker.finalFalsePositives).sum(),
+          stats.stream().mapToLong(worker -> worker.noMatchQueries).sum(),
+          stats.stream().mapToLong(worker -> worker.noMatchFalsePositives).sum(),
           List.copyOf(latencies),
           elapsedNanos / 1_000_000_000.0);
     }
@@ -457,8 +648,12 @@ public final class PostgresLoadBenchmark {
     private long timeouts;
     private long overTimeout;
     private long candidateTotal;
-    private long matchTotal;
     private long saturated;
+    private long labeledQueries;
+    private long finalTruePositives;
+    private long finalFalsePositives;
+    private long noMatchQueries;
+    private long noMatchFalsePositives;
     private final List<Long> latencies = new ArrayList<>();
   }
 
@@ -478,7 +673,7 @@ public final class PostgresLoadBenchmark {
       int durationSeconds = 10;
       int warmupSeconds = 2;
       int noMatchPercent = 10;
-      int requestTimeoutMillis = 5_000;
+      int requestTimeoutMillis = 30_000;
       String mode = "both";
       for (String argument : args) {
         String[] parts = argument.replaceFirst("^--", "").split("=", 2);

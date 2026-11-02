@@ -2,7 +2,9 @@ package io.github.lunaticconglomeratellc.encryptedfuzzysearch.postgres;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertThrows;
+import static org.testng.Assert.assertTrue;
 
+import java.util.Map;
 import org.testng.annotations.Test;
 
 public class PostgresLoadBenchmarkTest {
@@ -15,6 +17,7 @@ public class PostgresLoadBenchmarkTest {
     assertEquals(defaults.durationSeconds(), 10);
     assertEquals(defaults.warmupSeconds(), 2);
     assertEquals(defaults.noMatchPercent(), 10);
+    assertEquals(defaults.requestTimeoutMillis(), 30_000);
     assertEquals(defaults.mode(), "both");
 
     PostgresLoadBenchmark.Profile configured =
@@ -59,5 +62,13 @@ public class PostgresLoadBenchmarkTest {
 
     assertEquals(corpus.size(), 12);
     assertEquals(queries.size(), 6);
+  }
+
+  @Test
+  public void jsonReportEscapesTextAndSerializesAggregateValues() {
+    String json = BenchmarkReportWriter.json(Map.of("label", "synthetic\nvalue", "count", 3));
+
+    assertTrue(json.contains("synthetic\\nvalue"));
+    assertTrue(json.contains("\"count\":3"));
   }
 }

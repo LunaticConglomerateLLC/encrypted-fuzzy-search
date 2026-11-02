@@ -1,6 +1,6 @@
 # Runnable benchmark example
 
-From a clean checkout, run `./examples/benchmark/run.sh`. The script starts the disposable PostgreSQL Compose service, seeds generated records, runs the paired plaintext/EFS correctness and storage benchmark, runs a concurrent load profile, and stops Compose on exit (including failure). It uses the test-only key material and generated corpus in the benchmark source set. Console output contains aggregate measurements only.
+From a clean checkout, run `./examples/benchmark/run.sh`. The script starts the disposable PostgreSQL Compose service, seeds generated records, runs the paired plaintext/EFS correctness and storage benchmark, runs a concurrent load profile, writes `postgres-adapter/build/reports/benchmark/postgres-load.json`, and stops Compose on exit (including failure). It uses the test-only key material and generated corpus in the benchmark source set. Console and report output contain aggregate measurements only.
 
 Adjust the concurrent profile with these environment variables:
 
@@ -12,7 +12,7 @@ Adjust the concurrent profile with these environment variables:
 | `EFS_BENCHMARK_DURATION_SECONDS` | 10 | Measured steady-state duration per mode |
 | `EFS_BENCHMARK_WARMUP_SECONDS` | 2 | Warmup duration per mode, excluded from timed samples |
 | `EFS_BENCHMARK_NO_MATCH_PERCENT` | 10 | Share of generated no-match searches |
-| `EFS_BENCHMARK_REQUEST_TIMEOUT_MS` | 5000 | PostgreSQL statement timeout and reporting threshold |
+| `EFS_BENCHMARK_REQUEST_TIMEOUT_MS` | 30000 | PostgreSQL statement timeout and reporting threshold |
 
 Run concurrency 1, 4, 8, and 16 as separate invocations to inspect how the local database behaves as worker count grows. These local measurements are exploratory and do not establish an SLO or production capacity claim. Full parameter descriptions and interpretation limits are in [`../../BENCHMARKING.md`](../../BENCHMARKING.md).
 

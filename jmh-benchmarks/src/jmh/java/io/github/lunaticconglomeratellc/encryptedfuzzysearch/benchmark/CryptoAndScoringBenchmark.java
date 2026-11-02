@@ -34,6 +34,18 @@ public class CryptoAndScoringBenchmark {
   @Param({"32", "128", "512"})
   public int textLength;
 
+  @Param({"20261102"})
+  public long seed;
+
+  @Param({"synthetic-lowercase-ascii-v1"})
+  public String inputGenerator;
+
+  @Param({"unknown"})
+  public String sourceRevision;
+
+  @Param({"unknown"})
+  public String sourceTreeDirty;
+
   private static final byte[] ASSOCIATED_DATA =
       "synthetic-benchmark-context".getBytes(StandardCharsets.UTF_8);
   private final CanonicalTextNormalizer normalizer = new CanonicalTextNormalizer();
@@ -51,7 +63,7 @@ public class CryptoAndScoringBenchmark {
 
   @Setup(Level.Trial)
   public void setup() throws GeneralSecurityException {
-    SplittableRandom random = new SplittableRandom(20261102L + textLength);
+    SplittableRandom random = new SplittableRandom(seed + textLength);
     StringBuilder generated = new StringBuilder(textLength);
     for (int index = 0; index < textLength; index++) {
       generated.append((char) ('a' + random.nextInt(26)));
