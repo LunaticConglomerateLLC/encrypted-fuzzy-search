@@ -230,6 +230,8 @@ def render_markdown(comparison: dict[str, Any]) -> str:
         "",
         f"Same synthetic corpus and workload on the same runner; values are averaged over {comparison.get('sample_count', {}).get('baseline', 1)} base and {comparison.get('sample_count', {}).get('candidate', 1)} PR runs. Timing deltas are informational; no approved performance threshold is configured.",
         "",
+        "The same PR-supplied test-only benchmark harness is overlaid on the target checkout; target production sources remain at the recorded base revision.",
+        "",
         "| Mode | Measure | Base | PR | Change |",
         "| --- | --- | ---: | ---: | ---: |",
     ]

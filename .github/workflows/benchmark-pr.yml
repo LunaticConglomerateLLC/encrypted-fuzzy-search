@@ -27,6 +27,21 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: candidate
+      - name: Overlay PR benchmark harness on the target revision
+        run: |
+          baseline_package=baseline/postgres-adapter/src/test/java/io/github/lunaticconglomeratellc/encryptedfuzzysearch/postgres
+          mkdir -p "$baseline_package"
+          cp candidate/postgres-adapter/build.gradle.kts baseline/postgres-adapter/build.gradle.kts
+          for source in \
+            BenchmarkReportWriter.java \
+            FuzzySearchBenchmark.java \
+            PlaintextBenchmarkRunner.java \
+            PlaintextBenchmarkStore.java \
+            PostgresLoadBenchmark.java \
+            PostgresTestDataSource.java; do
+            cp "candidate/postgres-adapter/src/test/java/io/github/lunaticconglomeratellc/encryptedfuzzysearch/postgres/$source" \
+              "$baseline_package/$source"
+          done
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
