@@ -46,6 +46,52 @@ jobs:
             if (comparison.schema !== 'efs.benchmark-comparison.v1' || !Array.isArray(comparison.results)) {
               throw new Error('The comparison artifact has an unsupported schema.');
             }
+            const language = JSON.parse(fs.readFileSync('comparison/language-jmh.json', 'utf8'));
+            const languageTags = ['zh-Hans', 'ja-JP', 'ar-Arab', 'hi-Deva', 'bn-Beng', 'gu-Gujr', 'pa-Guru', 'ta-Taml', 'te-Telu', 'kn-Knda', 'ml-Mlym', 'or-Orya'];
+            if (language.schema !== 'efs.multilingual-component-report.v1'
+                || language.source_revision !== run.head_sha
+                || language.source_tree_dirty !== false
+                || language.workload?.synthetic !== true
+                || !Array.isArray(language.results)
+                || language.results.length !== languageTags.length) {
+              throw new Error('The multilingual component artifact has an unsupported schema or revision.');
+            }
+            const languageResults = new Map(language.results.map(result => [result.language_tag, result]));
+            if (languageResults.size !== languageTags.length || languageTags.some(tag => !languageResults.has(tag))) {
+              throw new Error('The multilingual component artifact is missing language profiles.');
+            }
+            const runtimeString = (value, field) => {
+              if (typeof value !== 'string' || !/^[A-Za-z0-9 .()+_-]{1,100}$/.test(value)) {
+                throw new Error(`Invalid multilingual runtime metadata for ${field}.`);
+              }
+              return value;
+            };
+            const runtimeInteger = (value, field) => {
+              if (!Number.isInteger(value) || value < 1 || value > 64) {
+                throw new Error(`Invalid multilingual runtime metadata for ${field}.`);
+              }
+              return value;
+            };
+            const jmhVersion = runtimeString(language.environment?.jmh_version, 'JMH version');
+            const javaVersion = runtimeString(language.environment?.java_version, 'Java version');
+            const javaVm = runtimeString(language.environment?.java_vm, 'Java VM');
+            const threads = runtimeInteger(language.environment?.threads, 'thread count');
+            const forks = runtimeInteger(language.environment?.forks, 'fork count');
+            const safeNumber = (value, field) => {
+              if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+                throw new Error(`Invalid multilingual benchmark value for ${field}.`);
+              }
+              return value.toFixed(2);
+            };
+            const languageRows = languageTags.map(tag => {
+              const result = languageResults.get(tag);
+              const expectedProvider = tag === 'ja-JP' ? 'lucene-kuromoji' : 'icu4j';
+              if (result.provider_id !== expectedProvider || typeof result.transform_id !== 'string'
+                  || result.transform_id.length > 64) {
+                throw new Error(`Invalid provider metadata for ${tag}.`);
+              }
+              return `| ${tag} | ${expectedProvider} | ${safeNumber(result.throughput_ops_per_microsecond, `${tag}.throughput`)} | ${safeNumber(result.latency_p50_microseconds, `${tag}.p50`)} | ${safeNumber(result.latency_p95_microseconds, `${tag}.p95`)} | ${safeNumber(result.latency_p99_microseconds, `${tag}.p99`)} |`;
+            });
             const modes = new Map(comparison.results.map(item => [item.mode, item.metrics]));
             const rows = [];
             const format = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : 'n/a';
@@ -65,7 +111,7 @@ jobs:
               rows.push(`| ${label} | Record relation (bytes) | ${format(metrics.postgres_record_relation_bytes.baseline, 0)} | ${format(metrics.postgres_record_relation_bytes.candidate, 0)} | ${change(metrics.postgres_record_relation_bytes.delta_percent)} |`);
             }
             const marker = '<!-- efs-pr-performance -->';
-            const body = `${marker}\n## PostgreSQL performance comparison\n\nBase \`${run.pull_requests?.[0]?.base?.sha?.slice(0, 12) || 'target'}\` → PR \`${run.head_sha.slice(0, 12)}\`. Values average two runs per revision on the same GitHub runner. The same PR-supplied test-only harness is applied to the target checkout; its production sources remain at the base revision.\n\n| Mode | Measure | Base | PR | Change |\n| --- | --- | ---: | ---: | ---: |\n${rows.join('\n')}\n\nPerformance deltas are informational; no owner-approved timing threshold exists. Review workload details in the [benchmark run](${run.html_url}). Runner and JVM variation remain, so use a reported change as a signal to investigate rather than as a definitive regression.\n`;
+            const body = `${marker}\n## PostgreSQL performance comparison\n\nBase \`${run.pull_requests?.[0]?.base?.sha?.slice(0, 12) || 'target'}\` → PR \`${run.head_sha.slice(0, 12)}\`. Values average two runs per revision on the same GitHub runner. The same PR-supplied test-only harness is applied to the target checkout; its production sources remain at the base revision.\n\n| Mode | Measure | Base | PR | Change |\n| --- | --- | ---: | ---: | ---: |\n${rows.join('\n')}\n\n## Multilingual provider component profile\n\nCandidate-only JMH measurements use synthetic inputs and report per-language throughput plus p50/p95/p99 transform latency. The providers are opt-in and do not exist in the target branch, so these are absolute PR component costs rather than base-to-PR deltas. JMH ${jmhVersion}, Java ${javaVersion} (${javaVm}), ${threads} thread(s), ${forks} forks.\n\n| Language tag | Provider | Throughput (ops/µs) | p50 (µs) | p95 (µs) | p99 (µs) |\n| --- | --- | ---: | ---: | ---: | ---: |\n${languageRows.join('\n')}\n\nPerformance deltas are informational; no owner-approved timing threshold exists. Review workload details in the [benchmark run](${run.html_url}). Runner and JVM variation remain, so use a reported change as a signal to investigate rather than as a definitive regression.\n`;
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,

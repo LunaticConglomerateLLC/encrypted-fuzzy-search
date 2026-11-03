@@ -4,19 +4,53 @@
 
 ## Automated pull-request and published reporting
 
-Every non-draft pull request runs the same PostgreSQL load profile twice against the target branch commit and twice against the proposed commit on the same GitHub-hosted runner. If the target branch predates this benchmark harness, the workflow overlays the PR's benchmark-only test sources and task registration onto the target checkout; target-branch production sources remain unchanged. Each revision gets a fresh disposable PostgreSQL database. The generated aggregate reports are checked for matching corpus, workload, Java runtime, host, and PostgreSQL settings, then averaged and compared for throughput, warm latency percentiles, final correctness, failures/timeouts, indexing rate, and PostgreSQL relation sizes. The report appears in the Actions run summary and as an updated pull request comment; the machine-readable comparison is retained as a workflow artifact.
+Every non-draft pull request runs the same PostgreSQL load profile twice against the target branch commit and twice against the proposed commit on the same GitHub-hosted runner. If the target branch predates this benchmark harness, the workflow overlays the PR's benchmark-only test sources and task registration onto the target checkout; target-branch production sources remain unchanged. Each revision gets a fresh disposable PostgreSQL database. The generated aggregate reports are checked for matching corpus, workload, Java runtime, host, and PostgreSQL settings, then averaged and compared for throughput, warm latency percentiles, final correctness, failures/timeouts, indexing rate, and PostgreSQL relation sizes. The candidate revision also runs synthetic multilingual JMH throughput and sample-time profiles for each configured language tag. The PR comment reports per-language throughput and p50/p95/p99 transform latency; these absolute component measurements are not base-to-PR deltas because the providers are new. The report appears in the Actions run summary and as an updated pull request comment; machine-readable reports are retained as workflow artifacts.
 
 These measurements are informational. The runner and workload are not an owner-approved production reference profile, so no percentage or latency threshold blocks merging. Review a change in context and repeat it under a controlled representative environment before treating a single noisy run as a regression.
 
 To ensure the report finishes before a pull request can merge, a repository maintainer should require the **Compare performance with the target branch** check in the branch protection rule or ruleset for the target branch. This requires the report to exist before merge but does not block on a performance delta; reviewers decide whether to fix the observed impact.
 
-After each push to `main`, the documentation workflow runs a longer paired load profile against that merged revision and publishes the aggregate JSON with a static performance page. To activate the deployment, a repository maintainer must open **Settings → Pages**, set **Build and deployment → Source** to **GitHub Actions**, and ensure the `github-pages` deployment environment is allowed. The site is then available at the repository's GitHub Pages URL. The published report includes generated synthetic aggregates and runtime metadata only; it excludes fixture values, protected tokens, and keys.
+After each push to `main`, the documentation workflow runs a longer PostgreSQL load profile and a multilingual JMH component profile against that merged revision, then publishes both JSON reports with the static performance page. The multilingual report covers each configured tag and includes throughput, p50/p95/p99 transform latency, provider/transform IDs, source revision, workload, and runtime metadata. To activate the deployment, a repository maintainer must open **Settings → Pages**, set **Build and deployment → Source** to **GitHub Actions**, and ensure the `github-pages` deployment environment is allowed. The site is then available at the repository's GitHub Pages URL. Reports include generated synthetic aggregates and runtime metadata only; they exclude fixture values, protected tokens, and keys.
 
 ## Goals and comparison boundary
 
 Measure candidate retrieval separately from authorized final verification. Candidate retrieval is the protected-index stage: its purpose is to include relevant records while controlling candidate volume. Final verification applies the configured similarity/scoring logic to authorized candidates. Report both stages so high final-match quality cannot conceal poor candidate recall, and a broad candidate set cannot appear accurate only because final verification filters it.
 
 Compare strategies against the same versioned corpus, entity-disjoint query split, hardware/database setup, normalization version, and workload. Record all configuration choices and do not compare results produced with different candidate limits, transforms, or filtering rules as if they were equivalent.
+
+## Multilingual transform cost and expansion
+
+`jmh-benchmarks` includes `LanguageVariantBenchmark` for synthetic Chinese, Japanese, Arabic, and Indic examples. It measures provider transform latency; regression tests lock the variant count for each benchmark sample so latency cannot hide a larger index/query expansion factor. The pull-request workflow reports each configured language tag in throughput and sample-time modes. Run a local version with:
+
+```bash
+./gradlew --no-daemon :jmh-benchmarks:jmh --args='LanguageVariantBenchmark -wi 5 -i 8 -f 2'
+```
+
+For each selected language, record the provider and immutable transform ID, throughput, and variants per input. These component numbers exclude protected-token generation, database candidate retrieval, decryption, and final verification. Use the paired PostgreSQL load benchmark to measure candidate volume, candidate recall/precision, final quality, and end-to-end latency before making an operational comparison. Keep timing informational until a representative workload and environment are approved. The language regression corpus is synthetic and intentionally small; its collision examples identify failure modes but are not population-level accuracy estimates.
+
+For latency distributions, run the same profile with `-bm sample` to report p50/p95/p99 rather than inferring tail latency from throughput:
+
+```bash
+./gradlew --no-daemon :jmh-benchmarks:jmh --args='LanguageVariantBenchmark -bm sample -wi 5 -i 8 -f 2'
+```
+
+### Exploratory multilingual component run (2026-11-03)
+
+The initial run showed repeated ICU transliterator construction dominating transform time, so the provider now caches one transliterator per transform ID and thread. The following warmed JMH 1.37 runs used Zulu OpenJDK 25.0.4.1 on macOS arm64, one thread, five 1-second warmup iterations, eight 1-second measurement iterations, and two forks. Throughput is mean operations per microsecond; the sample-time run reports per-call p50/p95/p99 in microseconds. The source checkout was dirty during these exploratory runs, and they are not target-branch comparisons or production SLOs.
+
+| Language tag | Synthetic input | Forms | Throughput (ops/µs) | p50 (µs) | p95 (µs) | p99 (µs) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `zh-Hans` | `重庆银行` | 4 | 0.030 ± 0.001 | 32.9 | 39.4 | 43.5 |
+| `ja-JP` | `東京都新宿区` | 3 | 0.179 ± 0.002 | 5.3 | 6.6 | 7.2 |
+| `ar-Arab` | `القاهرة` | 2 | 0.593 ± 0.029 | 1.7 | 2.0 | 3.6 |
+| `hi-Deva` | `नमस्ते दुनिया` | 3 | 0.257 ± 0.004 | 3.7 | 4.5 | 4.9 |
+| `ta-Taml` | `தமிழ்நாடு` | 2 | 0.362 ± 0.003 | 2.7 | 3.2 | 3.5 |
+
+An equivalent pre-cache exploratory run measured about 0.013, 0.181, 0.045, 0.031 and 0.033 ops/µs respectively. Thread-local ICU reuse raised Chinese throughput about 2.3×, Arabic about 13×, Hindi about 8× and Tamil about 11×; Japanese was unchanged because it uses Kuromoji plus a thread-local ICU transliterator. The test corpus locks the shown form counts. The Chinese transform remains the slowest sample and expands to four forms; measure that profile with protected-token generation and PostgreSQL candidate loads before adopting it for high-throughput fields.
+
+### Alias and mixed-script collision evaluation
+
+The synthetic service test indexes a Latin `PayPal` entity and a distinct Greek-rho lookalike `ΡayPal`, then searches the Greek form with the caller-supplied Latin alias. Both exact candidates are returned: 1 relevant of 2 results, precision 50%, recall 100% for the intended entity in this two-row fixture. This demonstrates that a known alias is an asserted equivalence and does not resolve mixed-script confusables; it is a targeted hard negative, not a corpus-wide false-positive estimate. Alias provenance stays distinct from language-provider provenance, and production-default policy continues to disable aliases.
 
 ## Corpus and fixture policy
 

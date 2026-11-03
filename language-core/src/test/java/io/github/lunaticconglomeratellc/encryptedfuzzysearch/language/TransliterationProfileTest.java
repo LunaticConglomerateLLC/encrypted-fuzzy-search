@@ -28,6 +28,24 @@ public class TransliterationProfileTest {
         IllegalArgumentException.class, () -> TransliterationProfile.forLanguageTag("zh-Hant"));
     assertThrows(
         IllegalArgumentException.class, () -> TransliterationProfile.forLanguageTag("zh_Hans"));
+    assertThrows(
+        IllegalArgumentException.class, () -> TransliterationProfile.forLanguageTag("ja-JP"));
+  }
+
+  @Test
+  public void resolvesExplicitArabicAndIndicScriptProfiles() {
+    assertEquals(
+        TransliterationProfile.forLanguageTag("ar-Arab").transliteratorId(), "Arabic-Latin");
+    assertEquals(
+        TransliterationProfile.forLanguageTag("hi-Deva").transliteratorId(), "Devanagari-Latin");
+    assertEquals(
+        TransliterationProfile.forLanguageTag("bn-Beng").transliteratorId(), "Bengali-Latin");
+    assertEquals(
+        TransliterationProfile.forLanguageTag("ta-Taml").transliteratorId(), "Tamil-Latin");
+    assertEquals(
+        TransliterationProfile.forLanguageTag("ar-Arab").transformId(),
+        "efs-translit-ar-Arab-icu4j-78.3-v1");
+    assertThrows(IllegalArgumentException.class, () -> TransliterationProfile.forLanguageTag("ar"));
   }
 
   @Test

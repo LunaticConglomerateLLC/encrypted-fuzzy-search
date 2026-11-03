@@ -12,6 +12,8 @@ import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.InvalidCiphe
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.NgramBlindIndexer;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.crypto.ScopedKeyDeriver;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.CanonicalTextNormalizer;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.Icu4jTransliterationProvider;
+import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.KuromojiJapaneseVariantProvider;
 import io.github.lunaticconglomeratellc.encryptedfuzzysearch.language.TransliterationProfile;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -318,6 +320,37 @@ public class EncryptedFuzzySearchServiceTest {
   }
 
   @Test
+  public void mixedScriptAliasCollisionIsMeasuredOnSyntheticHardNegative() throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    EncryptedFuzzySearchService service =
+        serviceWithPolicy(repository, expansionPolicy(true, Set.of()));
+    service.indexValue("tenant-a", "name", "expected-latin", "key-v1", "PayPal");
+    service.indexValue("tenant-a", "name", "spoof-greek-rho", "key-v1", "ΡayPal");
+    SearchAlias alias = new SearchAlias("PayPal", "synthetic-entity-alias", "v1");
+    SearchRequest request =
+        SearchRequest.exact("tenant-a", "name", "key-v1", "ΡayPal", 10)
+            .withExpansions(SearchExpansionOptions.aliases(List.of(alias)));
+
+    SearchOutcome outcome = service.search(request);
+
+    long relevantMatches =
+        outcome.matches().stream()
+            .filter(match -> match.recordId().equals("expected-latin"))
+            .count();
+    long falsePositiveMatches =
+        outcome.matches().stream()
+            .filter(match -> match.recordId().equals("spoof-greek-rho"))
+            .count();
+    assertEquals(relevantMatches, 1L);
+    assertEquals(falsePositiveMatches, 1L);
+    assertEquals((double) relevantMatches / outcome.matches().size(), 0.5);
+    assertEquals(
+        outcome.expansions(),
+        List.of(ExpansionProvenance.alias("synthetic-entity-alias", "v1")),
+        "caller-supplied aliases retain their own provenance and are not transliteration outputs");
+  }
+
+  @Test
   public void languageProviderSelectionIsExplicitVersionedAndUsedForIndexAndSearch()
       throws Exception {
     InMemoryRepository repository = new InMemoryRepository();
@@ -341,6 +374,39 @@ public class EncryptedFuzzySearchServiceTest {
     assertEquals(
         repository.documents.getFirst().transformVersion(),
         "icu4j-efs-translit-zh-Hans-icu4j-78.3-v2");
+  }
+
+  @Test
+  public void kuromojiProviderIsExplicitVersionedAndUsedForJapaneseIndexAndSearch()
+      throws Exception {
+    InMemoryRepository repository = new InMemoryRepository();
+    SearchPolicy policy = expansionPolicy(false, Set.of("lucene-kuromoji"));
+    EncryptedFuzzySearchService service =
+        new EncryptedFuzzySearchService(
+            keyDeriver(new AtomicInteger()),
+            new AuthenticatedFieldCipher(),
+            new CanonicalTextNormalizer(),
+            List.of(
+                new ProtectedExactStrategy(new ExactBlindIndexer()),
+                new ProtectedNgramStrategy(2, new NgramBlindIndexer()),
+                new ProtectedNgramStrategy(3, new NgramBlindIndexer())),
+            repository,
+            policy,
+            List.of(new Icu4jTransliterationProvider(), new KuromojiJapaneseVariantProvider()));
+    LanguageProviderSelection selection = new LanguageProviderSelection("lucene-kuromoji", "ja-JP");
+    service.indexValueWithLanguageProvider("tenant-a", "name", "tokyo", "key-v1", "東京", selection);
+    SearchRequest request =
+        SearchRequest.exact("tenant-a", "name", "key-v1", "toukyou", 10)
+            .withExpansions(SearchExpansionOptions.language(selection));
+
+    SearchOutcome outcome = service.search(request);
+
+    assertEquals(outcome.matches().getFirst().recordId(), "tokyo");
+    assertEquals(
+        outcome.expansions(),
+        List.of(
+            ExpansionProvenance.languageProvider(
+                "lucene-kuromoji", KuromojiJapaneseVariantProvider.TRANSFORM_ID, "ja-JP")));
   }
 
   @Test

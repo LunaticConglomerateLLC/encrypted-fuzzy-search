@@ -20,8 +20,43 @@
   <p><code>EFS_FULL</code> stores encrypted payloads and protected search tokens. <code>PLAINTEXT_CONTROL</code> stores generated plaintext values and raw n-grams solely as a synthetic comparison control. Neither mode uses customer data.</p>
   <h2>Measurements</h2>
   <p>The report separates completed throughput, warm p50/p95/p99 latency, final-match recall and precision, no-match false positives, failures/timeouts, indexing throughput, PostgreSQL relation sizes, and JVM/database/host context. Both modes use the same generated records, labels, query mix, candidate limit, database configuration, and concurrency settings.</p>
+  <h2>Multilingual component profile</h2>
+  <p>This separate synthetic JMH report measures provider transform throughput and p50/p95/p99 latency for each explicitly configured language tag. It includes source revision, provider/transform IDs, JVM/runtime settings, and links to the <a href="data/language-jmh.json">machine-readable multilingual report</a>.</p>
+  <p id="language-run-context">Loading multilingual report…</p>
+  <table>
+    <thead><tr><th>Language</th><th>Provider</th><th>Throughput (ops/µs)</th><th>p50 (µs)</th><th>p95 (µs)</th><th>p99 (µs)</th></tr></thead>
+    <tbody id="language-results"></tbody>
+  </table>
+  <script>
+    const context = document.getElementById('language-run-context');
+    const body = document.getElementById('language-results');
+    fetch('data/language-jmh.json').then(response => {
+      if (!response.ok) throw new Error('published multilingual report is unavailable');
+      return response.json();
+    }).then(report => {
+      context.textContent = `Revision ${report.source_revision.slice(0, 12)} · JMH ${report.environment.jmh_version} · Java ${report.environment.java_version} · ${report.environment.os_name} ${report.environment.architecture}`;
+      for (const result of report.results) {
+        const row = document.createElement('tr');
+        for (const value of [
+          result.language_tag,
+          `${result.provider_id} (${result.transform_id})`,
+          result.throughput_ops_per_microsecond.toFixed(3),
+          result.latency_p50_microseconds.toFixed(2),
+          result.latency_p95_microseconds.toFixed(2),
+          result.latency_p99_microseconds.toFixed(2),
+        ]) {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          row.appendChild(cell);
+        }
+        body.appendChild(row);
+      }
+    }).catch(error => {
+      context.textContent = `${error.message}.`;
+    });
+  </script>
   <h2>Limits</h2>
-  <p>These runs are repeatable indicators, not service-level guarantees. Runner noise, JVM scheduling, caches, and PostgreSQL scheduling affect results. No numeric performance threshold is currently approved; PR comparisons report deltas without blocking on timing.</p>
+  <p>These runs are repeatable indicators, not service-level guarantees. Runner noise, JVM scheduling, caches, and PostgreSQL scheduling affect results. Component timings exclude tokenization, database candidate retrieval, decryption, and final verification. No numeric performance threshold is currently approved; PR comparisons report deltas without blocking on timing.</p>
   <p>For the full corpus, fixture, and privacy contract, see <a href="https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/blob/main/BENCHMARKING.md">BENCHMARKING.md</a>.</p>
 </article></body>
 </html>

@@ -36,11 +36,26 @@ jobs:
           --args='--records=600 --candidate-limit=100 --concurrency=4
           --duration-seconds=30 --warmup-seconds=5 --no-match-percent=10
           --request-timeout-ms=30000'
+      - name: Stop PostgreSQL before component measurements
+        run: docker compose -f compose.test.yaml down --volumes --remove-orphans
+      - name: Measure multilingual provider component costs
+        run: >-
+          ./gradlew --no-daemon :jmh-benchmarks:jmh
+          --args='LanguageVariantBenchmark -bm thrpt,sample -wi 3 -i 5 -f 2
+          -rf json -rff build/reports/jmh/language-jmh-raw.json'
+      - name: Normalize and validate multilingual results
+        run: >-
+          python3 scripts/prepare_language_benchmark_report.py
+          jmh-benchmarks/build/reports/jmh/language-jmh-raw.json
+          --json-out "$RUNNER_TEMP/language-jmh.json"
+          --expected-revision "$GITHUB_SHA"
       - name: Upload merged-revision benchmark report
         uses: actions/upload-artifact@v4
         with:
           name: docs-performance-report
-          path: ${{ runner.temp }}/postgres-load.json
+          path: |
+            ${{ runner.temp }}/postgres-load.json
+            ${{ runner.temp }}/language-jmh.json
           retention-days: 7
       - name: Stop and remove disposable PostgreSQL test database
         if: always()
@@ -65,7 +80,7 @@ jobs:
       - name: Build static documentation site with the new report
         run: >-
           python3 scripts/build_docs_site.py benchmark/postgres-load.json --output site
-          --expected-revision "$GITHUB_SHA"
+          --expected-revision "$GITHUB_SHA" --language-report benchmark/language-jmh.json
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site

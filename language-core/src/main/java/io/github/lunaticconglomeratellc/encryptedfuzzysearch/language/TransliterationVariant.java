@@ -10,6 +10,8 @@ public record TransliterationVariant(Kind kind, String transformId, String value
     ORIGINAL,
     /** The output of the configured script transliterator. */
     LATIN,
+    /** A dictionary-derived reading emitted by a morphology-aware language provider. */
+    READING,
     /** A Latin transliteration with pinyin tone marks folded for the Chinese profile. */
     TONE_FOLDED_LATIN,
     /** Tone-folded Latin text with Unicode whitespace removed for compact query matching. */
