@@ -2,6 +2,16 @@
 
 **Status:** methodology and exploratory baseline runner. No accuracy/latency thresholds or service-level objectives have been approved.
 
+## Automated pull-request and published reporting
+
+Every non-draft pull request runs the same PostgreSQL load profile twice against the target branch commit and twice against the proposed commit on the same GitHub-hosted runner. If the target branch predates this benchmark harness, the workflow overlays the PR's benchmark-only test sources and task registration onto the target checkout; target-branch production sources remain unchanged. Each revision gets a fresh disposable PostgreSQL database. The generated aggregate reports are checked for matching corpus, workload, Java runtime, host, and PostgreSQL settings, then averaged and compared for throughput, warm latency percentiles, final correctness, failures/timeouts, indexing rate, and PostgreSQL relation sizes. The report appears in the Actions run summary and as an updated pull request comment; the machine-readable comparison is retained as a workflow artifact.
+
+These measurements are informational. The runner and workload are not an owner-approved production reference profile, so no percentage or latency threshold blocks merging. Review a change in context and repeat it under a controlled representative environment before treating a single noisy run as a regression.
+
+To ensure the report finishes before a pull request can merge, a repository maintainer should require the **Compare performance with the target branch** check in the branch protection rule or ruleset for the target branch. This requires the report to exist before merge but does not block on a performance delta; reviewers decide whether to fix the observed impact.
+
+After each push to `main`, the documentation workflow runs a longer paired load profile against that merged revision and publishes the aggregate JSON with a static performance page. To activate the deployment, a repository maintainer must open **Settings → Pages**, set **Build and deployment → Source** to **GitHub Actions**, and ensure the `github-pages` deployment environment is allowed. The site is then available at the repository's GitHub Pages URL. The published report includes generated synthetic aggregates and runtime metadata only; it excludes fixture values, protected tokens, and keys.
+
 ## Goals and comparison boundary
 
 Measure candidate retrieval separately from authorized final verification. Candidate retrieval is the protected-index stage: its purpose is to include relevant records while controlling candidate volume. Final verification applies the configured similarity/scoring logic to authorized candidates. Report both stages so high final-match quality cannot conceal poor candidate recall, and a broad candidate set cannot appear accurate only because final verification filters it.
@@ -80,9 +90,76 @@ The following remain open until owners review empirical baselines and intended d
 
 Do not claim an accuracy, scale, or latency guarantee until the threshold is agreed and the relevant held-out benchmark evidence exists.
 
+## Paired plaintext and EFS comparison contract
+
+The v3.1 suite compares modes on the same deterministic synthetic records, entity split, queries, expected entity labels, normalization, n-gram semantics, candidate limit, scoring profile, database version/configuration, and load profile. Load the fixture independently for each mode and record the fixture seed and source revision. Compare absolute values and paired deltas; report percentage overhead only when the plaintext measurement is non-zero. A mode comparison is useful only when the correctness measures are reported alongside performance.
+
+| Benchmark mode | Stored field payload | Stored search postings | Intended use |
+| --- | --- | --- | --- |
+| `PLAINTEXT_CONTROL` | Canonical plaintext | Raw canonical n-grams | Synthetic reference for the same search behavior without storage protection |
+| `EFS_FULL` | AES-GCM ciphertext | HMAC-protected n-grams | Production EFS design under evaluation |
+| `EFS_PAYLOAD_ONLY_DIAGNOSTIC` | AES-GCM ciphertext | Raw canonical n-grams | Optional synthetic-only diagnosis that separates payload encryption from protected-index costs |
+
+`EFS_PAYLOAD_ONLY_DIAGNOSTIC` is a benchmark-only mode, leaks n-gram content, must use generated test data in a disposable local database, and must not be selectable through production application configuration. Never use customer or real personal data for either plaintext mode. Do not print payloads, normalized forms, postings, keys, or query text in logs or reports.
+
+The primary correctness comparison reports candidate recall/precision/count before decrypt-and-verify and final precision/recall after verification. It also reports no-match false positives and candidate-cap saturation by query stratum. All modes use the same labels and acceptance threshold for a given profile; if actual match sets differ, report the difference instead of silently tuning one mode to match another. The benchmark is a comparator, not evidence that plaintext storage meets EFS privacy properties.
+
+For each mode, separate fixture loading/indexing from query runs. For queries report latency distributions (p50, p95, p99), achieved query rate, failures/timeouts, candidate counts, and cap saturation. State whether each measurement includes normalization, key derivation/access, token generation, database retrieval, decryption, and final scoring. Run single-client and concurrent profiles; record load shape and concurrency. Treat cold-start and warmed steady-state measurements as distinct runs with an explicit reset/warmup procedure.
+
+Report storage as payload bytes, logical posting bytes, total PostgreSQL relation/index bytes, and bytes per record. Keep JVM CPU/heap/GC and PostgreSQL resource/configuration context separate. Component-level JVM timings belong in JMH reports and must not be presented as end-to-end service latency. SQL-only `pgbench` results also remain separate from full Java/EFS request results.
+
+Initial v3.1 reports establish reproducible baselines and relative costs only. No maximum latency, minimum throughput, acceptable encryption overhead, or capacity promise is a release gate until the owner approves a representative deployment workload and threshold.
+
 ## Exploratory PostgreSQL baseline
 
 The repository provides a deterministic synthetic benchmark runner in the PostgreSQL adapter test source set. Start the disposable Compose database, then run `./gradlew --no-daemon :postgres-adapter:fuzzySearchBenchmark`. The runner seeds 400 unique synthetic positive records and 200 prefix-sharing hard negatives from seed `20261019`, evaluates 300 single-substitution queries and 50 no-match queries, and excludes 30 warm-up searches from timed samples. It emits aggregate metrics and runtime/database metadata only; it does not print synthetic values or protected tokens. It reports retrieval recall/precision separately from final-match recall/precision, as well as index/token frequency, latency, throughput, and PostgreSQL relation sizes. These numbers are a local exploratory baseline, not a release threshold, production estimate, or security guarantee.
+
+### Concurrent PostgreSQL load profile
+
+Run `./gradlew --no-daemon :postgres-adapter:postgresLoadBenchmark --args='--records=600 --candidate-limit=100 --concurrency=4 --duration-seconds=30 --warmup-seconds=5 --no-match-percent=10 --request-timeout-ms=30000'` with the Compose database running. The runner seeds each mode independently and sequentially, then runs the same typo/no-match mix against the Java service plus PostgreSQL adapter. Configure record count (two-thirds labeled positives, remainder hard negatives), candidate limit, fixed worker concurrency, warmup/measurement duration, no-match percentage, server-side PostgreSQL statement timeout, and mode (`both`, `EFS_FULL`, or `PLAINTEXT_CONTROL`). It reports first-search cold latency separately from warmed concurrent p50/p95/p99, completed QPS, failures, SQL timeouts, completed requests beyond the configured threshold, candidate volume/cap saturation, index throughput, JVM heap/GC/process CPU deltas, PostgreSQL version/configuration, and per-mode table sizes. Each JDBC connection sets `statement_timeout`, so that guard adds a small equal cost to both modes. Run concurrency 1, 4, 8, and 16 as separate invocations for an increasing-load profile. It has no HTTP layer; it measures direct Java service calls. Results are aggregate-only and use generated values and test keys. `docker compose -f compose.test.yaml down` removes the disposable service and its synthetic database contents.
+
+The concurrent runner writes an aggregate JSON report to `postgres-adapter/build/reports/benchmark/postgres-load.json`; set `EFS_BENCHMARK_REPORT_FILE` to choose another path (relative paths resolve from `postgres-adapter/`). The versioned `efs.benchmark-report.v1` schema records UTC time, checked-out source revision and dirty-tree flag, generator/seed/counts, mode and workload settings, JDK/VM/host metadata, PostgreSQL version/configuration, and per-mode final recall/precision, no-match false positives, candidate counts/cap saturation, cold/warm latency, throughput, failures/timeouts, JVM, and relation-size metrics. A cold first-search failure is recorded and does not abort later measured phases. The report contains no query, record, normalized value, key, or token content. CI retains the one-second correctness smoke report as an artifact; the manual `Benchmark load profile` workflow runs the longer user-selected profile and retains its report. The comparison tables below are the human-readable report. Timing values are artifact data only: no numeric CI threshold is enforced until a representative deployment workload and owner-approved limits exist.
+
+The runner now executes both `EFS_FULL` and `PLAINTEXT_CONTROL` against the same generated corpus and held-out queries. Before emitting the plaintext results, it requires the ordered candidate IDs, final accepted IDs, and no-match outcomes to agree with EFS. The plaintext table is test-source-only and is cleared and reseeded on each run. The comparison records logical posting/payload bytes and physical PostgreSQL relation sizes separately; the two logical byte measures do not include object headers, indexes, or database page overhead.
+
+### Paired plaintext and EFS run (2026-11-02)
+
+Environment: JDK 25.0.4.1, PostgreSQL 18.6 in the local Compose service, macOS/aarch64, 12 reported processors, and a 9 GiB JVM maximum heap. Same deterministic 600-record corpus, 300 single-substitution queries, 50 no-match queries, candidate limit 100, and score threshold 0.80. One local, single-threaded run reported:
+
+| Measure | `PLAINTEXT_CONTROL` | `EFS_FULL` |
+| --- | ---: | ---: |
+| Candidate recall / precision | 1.000 / 0.010 | 1.000 / 0.010 |
+| Final recall / precision | 1.000 / 1.000 | 1.000 / 1.000 |
+| No-match false positives | 0/50 | 0/50 |
+| Candidate cap saturation | 300/300 | 300/300 |
+| Candidate retrieval latency, p50 / p95 / p99 | 8.077 / 12.647 / 16.204 ms | 8.024 / 10.478 / 12.876 ms |
+| Full search latency, p50 / p95 / p99 | 8.225 / 13.336 / 16.405 ms | 8.660 / 11.258 / 14.200 ms |
+| Full search throughput | 111.68 queries/s | 112.64 queries/s |
+| Indexing throughput | 101.46 records/s | 117.81 records/s |
+| Postings / distinct tokens | 20,256 / 6,859 raw | 20,256 / 6,859 protected |
+| Logical posting bytes | 59,710 raw token-value bytes | 788,784 protected-token bytes |
+| Logical payload bytes | 10,800 plaintext bytes | 30,000 ciphertext bytes |
+| PostgreSQL token / record relation sizes | 4,784,128 / 155,648 bytes | 6,848,512 / 253,952 bytes |
+
+This single local run does not show a stable latency penalty attributable to protection: the paired measurements are close and noisy, and the EFS and plaintext runs execute sequentially in one process. It does show greater logical token and relation storage for EFS in this fixture. Both modes saturated the candidate cap and had 1% candidate precision; the final scorer recovered all labeled targets for this narrow corpus. Treat these measurements as a reproducibility check, not a capacity, performance, or quality guarantee. Repeat with randomized run order, multiple forks/processes, representative deployment hardware, and approved workload thresholds before making performance claims.
+
+### Concurrent local load run (2026-11-02)
+
+One full default run used JDK 25.0.4.1, PostgreSQL 18.6, macOS/aarch64 with 12 reported processors and a 9 GiB JVM maximum heap. It seeded 600 synthetic records (400 labeled positives and 200 hard negatives), used candidate limit 100, four workers, a two-second warmup, ten-second measured phases per mode, 10% no-match traffic, and a 30-second PostgreSQL statement timeout.
+
+| Measure | `EFS_FULL` | `PLAINTEXT_CONTROL` |
+| --- | ---: | ---: |
+| Cold first-search latency | 30.647 ms | 12.166 ms |
+| Warm search latency, p50 / p95 / p99 | 10.687 / 14.080 / 21.776 ms | 9.257 / 12.639 / 19.323 ms |
+| Completed throughput | 365.57 queries/s | 417.69 queries/s |
+| Failures / statement timeouts | 0 / 0 | 0 / 0 |
+| Final recall / precision | 1.000 / 1.000 (3,289 positive requests) | 1.000 / 1.000 (3,766 positive requests) |
+| No-match false positives | 0/372 | 0/412 |
+| Mean candidates / cap saturation | 89.839 / 89.84% | 90.139 / 90.14% |
+| Indexing throughput | 101.42 records/s | 111.76 records/s |
+| PostgreSQL token / record relation sizes | 6,840,320 / 253,952 bytes | 4,775,936 / 155,648 bytes |
+
+This single sequential local run is a smoke measurement, not a stable comparison: each mode was driven until its fixed duration ended, so completed request counts differ, and order, JIT, garbage collection, and local Docker scheduling can affect the result. Both modes reached the candidate limit for about 90% of requests. The observed final recall does not remove that truncation risk for other data. Use the attached JSON schema for reproducibility, repeat with randomized mode order and representative deployment hardware, and obtain owner-approved thresholds before making capacity or performance claims.
 
 ### Recorded local run (2026-10-19)
 
@@ -163,6 +240,12 @@ The PostgreSQL benchmark runner now also applies each scorer to the same v0.2 ca
 This fixture contains one continuous random code-point token per record and only single substitutions. It therefore does not exercise token order, multiple terms, OCR confusions, or adjacent transpositions. The zero-result token-set/BM25 precision is undefined, not zero. Weighted bigrams rejected most relevant candidates at threshold `0.80`; candidate retrieval itself still included them. Soft TF-IDF handled this single-token typo workload, while the small name-like fixture above favors token-aware profiles on different transformations. These results show dataset dependence and are exploratory; they do not justify changing the default scorer or establish general quality.
 
 The isotonic-calibration sanity test fits 20 synthetic score/label pairs (10 per class) and evaluates four separate synthetic held-out examples. On that deliberately separable fixture it reports Brier score `0.0000` and expected calibration error `0.0000`. This checks model fitting and metric calculation only; four held-out cases do not support a real-world confidence claim or production calibration.
+
+### JVM component microbenchmarks
+
+Run the JMH suite with `./gradlew --no-daemon :jmh-benchmarks:jmh`. It writes JSON results under `jmh-benchmarks/build/reports/jmh/results.json`, which is generated output and should not be committed. JMH 1.37 benchmarks AES-GCM encrypt/decrypt, exact HMAC token generation, protected bigram/trigram generation, canonical normalization, and each supported final scorer. Text lengths are 32, 128, and 512 ASCII code points; scoring candidate sets contain 1, 10, or 50 entries. Inputs are deterministic synthetic values. The scorer benchmark returns all candidate scores to JMH's result consumer.
+
+The default methods use throughput mode, two forks, five one-second warmup iterations, and eight one-second measurement iterations. JMH output and JSON include the JDK/VM, machine, source revision/dirty-tree flag, generator ID/seed, benchmark parameters, fork/warmup/measurement configuration, and measured values. For a quick compile-and-run smoke only, for example: `./gradlew --no-daemon :jmh-benchmarks:jmh --args='CryptoAndScoringBenchmark.aesGcmEncrypt -p textLength=32 -wi 1 -i 1 -f 1 -w 100ms -r 100ms -rf json -rff build/reports/jmh/smoke.json'`. Smoke settings are not suitable for performance conclusions. These component measurements exclude PostgreSQL, fixture loading, request orchestration, key-service latency, and concurrent load; do not interpret them as end-to-end throughput or gate CI on elapsed-time values.
 
 ### Entity-disjoint advanced-scoring evaluation (2026-11-02)
 

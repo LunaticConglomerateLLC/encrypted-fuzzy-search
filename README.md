@@ -54,6 +54,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/) for commit mess
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [DEPENDENCIES.md](DEPENDENCIES.md) for the current contribution and dependency policies.
 See [BENCHMARKING.md](BENCHMARKING.md) for the reproducible corpus and measurement methodology; performance and accuracy thresholds remain open until agreed from empirical baselines.
+After GitHub Pages is enabled for the repository, the [performance documentation site](https://lunaticconglomeratellc.github.io/encrypted-fuzzy-search/) publishes the latest merged-revision benchmark report.
 
 ## License
 

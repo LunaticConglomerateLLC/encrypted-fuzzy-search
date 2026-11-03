@@ -1,0 +1,70 @@
+name: Benchmark load profile
+
+on:
+  workflow_dispatch:
+    inputs:
+      records:
+        description: Synthetic record count
+        required: true
+        default: '600'
+        type: number
+      concurrency:
+        description: Number of concurrent workers
+        required: true
+        default: '4'
+        type: choice
+        options:
+          - '1'
+          - '4'
+          - '8'
+          - '16'
+      duration_seconds:
+        description: Measured seconds per mode
+        required: true
+        default: '30'
+        type: number
+      warmup_seconds:
+        description: Warmup seconds per mode
+        required: true
+        default: '5'
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Manual PostgreSQL benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Start disposable PostgreSQL test database
+        run: docker compose -f compose.test.yaml up --detach --wait --wait-timeout 60
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+      - name: Run paired correctness, storage, and scorer comparison
+        run: ./gradlew --no-daemon :postgres-adapter:fuzzySearchBenchmark
+      - name: Run configured concurrent load profile
+        run: >-
+          ./gradlew --no-daemon :postgres-adapter:postgresLoadBenchmark
+          --args='--records=${{ inputs.records }} --candidate-limit=100
+          --concurrency=${{ inputs.concurrency }}
+          --duration-seconds=${{ inputs.duration_seconds }}
+          --warmup-seconds=${{ inputs.warmup_seconds }} --no-match-percent=10
+          --request-timeout-ms=30000'
+      - name: Upload aggregate reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ github.run_id }}
+          path: |
+            postgres-adapter/build/reports/benchmark/**
+          if-no-files-found: ignore
+      - name: Stop and remove disposable PostgreSQL test database
+        if: always()
+        run: docker compose -f compose.test.yaml down --volumes --remove-orphans

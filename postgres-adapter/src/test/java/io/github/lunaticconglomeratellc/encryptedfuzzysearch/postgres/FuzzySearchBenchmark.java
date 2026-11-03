@@ -41,18 +41,18 @@ import javax.crypto.spec.SecretKeySpec;
 
 /** Deterministic, synthetic, single-process benchmark for real PostgreSQL search behavior. */
 public final class FuzzySearchBenchmark {
-  private static final int POSITIVE_RECORD_COUNT = 400;
-  private static final int HARD_NEGATIVE_COUNT = 200;
-  private static final int RECORD_COUNT = POSITIVE_RECORD_COUNT + HARD_NEGATIVE_COUNT;
-  private static final int QUERY_COUNT = 300;
-  private static final int NO_MATCH_QUERY_COUNT = 50;
-  private static final int WARMUP_QUERY_COUNT = 30;
-  private static final int CANDIDATE_LIMIT = 100;
-  private static final double MINIMUM_SIMILARITY = 0.80;
-  private static final long CORPUS_SEED = 20261019L;
-  private static final String TENANT_ID = "benchmark-tenant";
-  private static final String FIELD_ID = "name";
-  private static final String KEY_ID = "benchmark-key-v1";
+  static final int POSITIVE_RECORD_COUNT = 400;
+  static final int HARD_NEGATIVE_COUNT = 200;
+  static final int RECORD_COUNT = POSITIVE_RECORD_COUNT + HARD_NEGATIVE_COUNT;
+  static final int QUERY_COUNT = 300;
+  static final int NO_MATCH_QUERY_COUNT = 50;
+  static final int WARMUP_QUERY_COUNT = 30;
+  static final int CANDIDATE_LIMIT = 100;
+  static final double MINIMUM_SIMILARITY = 0.80;
+  static final long CORPUS_SEED = 20261019L;
+  static final String TENANT_ID = "benchmark-tenant";
+  static final String FIELD_ID = "name";
+  static final String KEY_ID = "benchmark-key-v1";
   private static final String ALPHABET = "abcdefghjkmnpqrstuvwxy";
 
   private FuzzySearchBenchmark() {}
@@ -110,6 +110,8 @@ public final class FuzzySearchBenchmark {
 
     List<Long> retrievalLatencies = new ArrayList<>(QUERY_COUNT);
     List<Long> searchLatencies = new ArrayList<>(QUERY_COUNT);
+    List<List<String>> protectedCandidateIds = new ArrayList<>(QUERY_COUNT);
+    List<List<String>> protectedFinalIds = new ArrayList<>(QUERY_COUNT);
     Set<String> uniqueTokens = new HashSet<>();
     Map<String, Integer> tokenFrequencies = new HashMap<>();
     long tokenCount = 0;
@@ -145,6 +147,7 @@ public final class FuzzySearchBenchmark {
       List<SearchCandidate> candidates =
           repository.findCandidates(TENANT_ID, FIELD_ID, KEY_ID, queryTokens, CANDIDATE_LIMIT);
       retrievalLatencies.add(System.nanoTime() - retrievalStarted);
+      protectedCandidateIds.add(candidates.stream().map(SearchCandidate::recordId).toList());
       candidateCount += candidates.size();
       if (candidates.size() == CANDIDATE_LIMIT) {
         saturatedCandidateQueries++;
@@ -159,6 +162,7 @@ public final class FuzzySearchBenchmark {
           service.search(
               TENANT_ID, FIELD_ID, KEY_ID, query.value(), CANDIDATE_LIMIT, MINIMUM_SIMILARITY);
       searchLatencies.add(System.nanoTime() - searchStarted);
+      protectedFinalIds.add(results.stream().map(FuzzySearchResult::recordId).toList());
       if (results.stream().anyMatch(result -> result.recordId().equals(query.expectedId()))) {
         finalTruePositives++;
       }
@@ -201,6 +205,7 @@ public final class FuzzySearchBenchmark {
     double finalRecall = (double) finalTruePositives / queryCases.size();
     long searchElapsed = searchLatencies.stream().mapToLong(Long::longValue).sum();
 
+    System.out.println("=== benchmark_mode=EFS_FULL ===");
     System.out.println("EFS synthetic benchmark (aggregate-only; no fixture values emitted)");
     System.out.println("corpus_id=synthetic-random-codepoints-seed-20261019-v1");
     System.out.println(
@@ -246,8 +251,11 @@ public final class FuzzySearchBenchmark {
         "candidate_retrieval_latency_ms_p50=%.3f%n", percentileMillis(retrievalLatencies, 0.50));
     System.out.printf(
         "candidate_retrieval_latency_ms_p95=%.3f%n", percentileMillis(retrievalLatencies, 0.95));
+    System.out.printf(
+        "candidate_retrieval_latency_ms_p99=%.3f%n", percentileMillis(retrievalLatencies, 0.99));
     System.out.printf("full_search_latency_ms_p50=%.3f%n", percentileMillis(searchLatencies, 0.50));
     System.out.printf("full_search_latency_ms_p95=%.3f%n", percentileMillis(searchLatencies, 0.95));
+    System.out.printf("full_search_latency_ms_p99=%.3f%n", percentileMillis(searchLatencies, 0.99));
     System.out.printf(
         "full_search_throughput_qps=%.2f%n", queryCases.size() / (searchElapsed / 1_000_000_000.0));
     System.out.println(
@@ -271,6 +279,14 @@ public final class FuzzySearchBenchmark {
         "measurement_mode=single-threaded local Docker database, 30 warm-up queries excluded from timed samples");
     System.out.println(
         "limitations=single synthetic corpus and local environment; measurements are exploratory, not SLOs or recall guarantees");
+
+    PlaintextBenchmarkRunner.run(
+        dataSource,
+        corpus,
+        queryCases,
+        protectedCandidateIds,
+        protectedFinalIds,
+        noMatchFalsePositives);
   }
 
   private static List<FinalScorer> scorers() {
@@ -352,18 +368,26 @@ public final class FuzzySearchBenchmark {
     }
   }
 
-  private static List<Fixture> createCorpus() {
+  static List<Fixture> createCorpus() {
+    return createCorpus(POSITIVE_RECORD_COUNT, HARD_NEGATIVE_COUNT);
+  }
+
+  static List<Fixture> createCorpus(int positiveCount, int hardNegativeCount) {
+    if (positiveCount < 1 || hardNegativeCount < 0) {
+      throw new IllegalArgumentException(
+          "corpus requires a positive record and non-negative negatives");
+    }
     SplittableRandom random = new SplittableRandom(CORPUS_SEED);
     Set<String> uniqueValues = new HashSet<>();
-    List<Fixture> fixtures = new ArrayList<>(RECORD_COUNT);
-    while (fixtures.size() < POSITIVE_RECORD_COUNT) {
+    List<Fixture> fixtures = new ArrayList<>(positiveCount + hardNegativeCount);
+    while (fixtures.size() < positiveCount) {
       String generated = randomValue(random);
       if (uniqueValues.add(generated)) {
         fixtures.add(new Fixture("entity-%04d".formatted(fixtures.size()), generated));
       }
     }
-    for (int index = 0; index < HARD_NEGATIVE_COUNT; index++) {
-      String prefix = fixtures.get(index).value().substring(0, 8);
+    for (int index = 0; index < hardNegativeCount; index++) {
+      String prefix = fixtures.get(index % positiveCount).value().substring(0, 8);
       String generated = prefix + randomValue(random).substring(8);
       if (uniqueValues.add(generated)) {
         fixtures.add(new Fixture("hard-negative-%04d".formatted(index), generated));
@@ -380,9 +404,16 @@ public final class FuzzySearchBenchmark {
     return value.toString();
   }
 
-  private static List<QueryCase> createQueries(List<Fixture> corpus) {
-    List<QueryCase> queries = new ArrayList<>(QUERY_COUNT);
-    for (int index = 0; index < QUERY_COUNT; index++) {
+  static List<QueryCase> createQueries(List<Fixture> corpus) {
+    return createQueries(corpus, Math.min(QUERY_COUNT, corpus.size()));
+  }
+
+  static List<QueryCase> createQueries(List<Fixture> corpus, int queryCount) {
+    if (queryCount < 1 || queryCount > corpus.size()) {
+      throw new IllegalArgumentException("query count must be between 1 and corpus size");
+    }
+    List<QueryCase> queries = new ArrayList<>(queryCount);
+    for (int index = 0; index < queryCount; index++) {
       Fixture fixture = corpus.get(index);
       char original = fixture.value().charAt(8);
       char replacement = original == 'a' ? 'b' : 'a';
@@ -440,7 +471,7 @@ public final class FuzzySearchBenchmark {
     return sorted.get(Math.max(0, index)) / 1_000_000.0;
   }
 
-  private record Fixture(String id, String value) {}
+  record Fixture(String id, String value) {}
 
-  private record QueryCase(String expectedId, String value) {}
+  record QueryCase(String expectedId, String value) {}
 }

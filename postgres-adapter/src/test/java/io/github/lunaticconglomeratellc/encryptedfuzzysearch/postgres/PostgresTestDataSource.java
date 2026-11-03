@@ -15,15 +15,44 @@ final class PostgresTestDataSource implements DataSource {
   private final String user = System.getenv().getOrDefault("EFS_TEST_DB_USER", "efs_test");
   private final String password =
       System.getenv().getOrDefault("EFS_TEST_DB_PASSWORD", "efs_test_only");
+  private final int statementTimeoutMillis;
+
+  PostgresTestDataSource() {
+    this(0);
+  }
+
+  PostgresTestDataSource(int statementTimeoutMillis) {
+    if (statementTimeoutMillis < 0) {
+      throw new IllegalArgumentException("statement timeout must not be negative");
+    }
+    this.statementTimeoutMillis = statementTimeoutMillis;
+  }
 
   @Override
   public Connection getConnection() throws SQLException {
-    return DriverManager.getConnection(url, user, password);
+    return configure(DriverManager.getConnection(url, user, password));
   }
 
   @Override
   public Connection getConnection(String username, String userPassword) throws SQLException {
-    return DriverManager.getConnection(url, username, userPassword);
+    return configure(DriverManager.getConnection(url, username, userPassword));
+  }
+
+  private Connection configure(Connection connection) throws SQLException {
+    if (statementTimeoutMillis == 0) {
+      return connection;
+    }
+    try (var statement = connection.createStatement()) {
+      statement.execute("SET statement_timeout = " + statementTimeoutMillis);
+      return connection;
+    } catch (SQLException failure) {
+      try {
+        connection.close();
+      } catch (SQLException closeFailure) {
+        failure.addSuppressed(closeFailure);
+      }
+      throw failure;
+    }
   }
 
   @Override

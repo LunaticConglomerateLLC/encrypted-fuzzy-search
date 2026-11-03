@@ -28,8 +28,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
+      - name: Test benchmark comparison and documentation helpers
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Build, format, test, and verify coverage
         run: ./gradlew --no-daemon clean check
+      - name: Run synthetic benchmark harness smoke (no timing gate)
+        run: >-
+          ./gradlew --no-daemon :postgres-adapter:postgresLoadBenchmark
+          --args='--records=60 --candidate-limit=30 --concurrency=2
+          --duration-seconds=1 --warmup-seconds=1 --no-match-percent=10
+          --request-timeout-ms=5000'
       - name: Upload test and coverage reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -38,6 +46,7 @@ jobs:
           path: |
             **/build/reports/tests/**
             **/build/reports/jacoco/**
+            postgres-adapter/build/reports/benchmark/**
           if-no-files-found: ignore
       - name: Stop and remove disposable PostgreSQL test database
         if: always()

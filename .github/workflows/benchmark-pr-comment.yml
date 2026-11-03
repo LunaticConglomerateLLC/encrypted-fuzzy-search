@@ -1,0 +1,90 @@
+name: Report PR performance comparison
+
+on:
+  workflow_run:
+    workflows: [PR performance benchmark]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download validated comparison artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-performance-comparison
+          path: comparison
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Find pull request and update its benchmark comment
+        uses: actions/github-script@v7
+        env:
+          WORKFLOW_RUN: ${{ toJSON(github.event.workflow_run) }}
+        with:
+          script: |
+            const fs = require('fs');
+            const run = JSON.parse(process.env.WORKFLOW_RUN);
+            const linked = run.pull_requests || [];
+            const prs = linked.length ? linked : (await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 100,
+            })).data.filter(pr => pr.head.sha === run.head_sha || pr.merge_commit_sha === run.head_sha);
+            const pr = prs.find(item => item.head.sha === run.pull_requests?.[0]?.head?.sha) || prs[0];
+            if (!pr) {
+              core.warning('Could not identify the pull request for this benchmark run.');
+              return;
+            }
+            const comparison = JSON.parse(fs.readFileSync('comparison/comparison.json', 'utf8'));
+            if (comparison.schema !== 'efs.benchmark-comparison.v1' || !Array.isArray(comparison.results)) {
+              throw new Error('The comparison artifact has an unsupported schema.');
+            }
+            const modes = new Map(comparison.results.map(item => [item.mode, item.metrics]));
+            const rows = [];
+            const format = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : 'n/a';
+            const change = value => Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : 'n/a';
+            for (const [mode, label] of [['EFS_FULL', 'EFS'], ['PLAINTEXT_CONTROL', 'Plaintext control']]) {
+              const metrics = modes.get(mode);
+              if (!metrics) throw new Error(`Missing ${mode} results.`);
+              rows.push(`| ${label} | Throughput (queries/s) | ${format(metrics.completed_throughput_qps.baseline)} | ${format(metrics.completed_throughput_qps.candidate)} | ${change(metrics.completed_throughput_qps.delta_percent)} |`);
+              rows.push(`| ${label} | Warm p95 latency (ms) | ${format(metrics.warm_latency_ms_p95.baseline, 3)} | ${format(metrics.warm_latency_ms_p95.candidate, 3)} | ${change(metrics.warm_latency_ms_p95.delta_percent)} |`);
+              rows.push(`| ${label} | Final recall | ${format(metrics.final_recall.baseline, 4)} | ${format(metrics.final_recall.candidate, 4)} | ${change(metrics.final_recall.delta_percent)} |`);
+              rows.push(`| ${label} | Final precision | ${format(metrics.final_precision.baseline, 4)} | ${format(metrics.final_precision.candidate, 4)} | ${change(metrics.final_precision.delta_percent)} |`);
+              rows.push(`| ${label} | No-match false-positive rate | ${format(metrics.no_match_false_positive_rate.baseline, 4)} | ${format(metrics.no_match_false_positive_rate.candidate, 4)} | ${change(metrics.no_match_false_positive_rate.delta_percent)} |`);
+              rows.push(`| ${label} | Failures (mean count) | ${format(metrics.failures.baseline, 1)} | ${format(metrics.failures.candidate, 1)} | ${change(metrics.failures.delta_percent)} |`);
+              rows.push(`| ${label} | Timeouts (mean count) | ${format(metrics.timeouts.baseline, 1)} | ${format(metrics.timeouts.candidate, 1)} | ${change(metrics.timeouts.delta_percent)} |`);
+              rows.push(`| ${label} | Indexing (records/s) | ${format(metrics.index_records_per_second.baseline)} | ${format(metrics.index_records_per_second.candidate)} | ${change(metrics.index_records_per_second.delta_percent)} |`);
+              rows.push(`| ${label} | Token relation (bytes) | ${format(metrics.postgres_token_relation_bytes.baseline, 0)} | ${format(metrics.postgres_token_relation_bytes.candidate, 0)} | ${change(metrics.postgres_token_relation_bytes.delta_percent)} |`);
+              rows.push(`| ${label} | Record relation (bytes) | ${format(metrics.postgres_record_relation_bytes.baseline, 0)} | ${format(metrics.postgres_record_relation_bytes.candidate, 0)} | ${change(metrics.postgres_record_relation_bytes.delta_percent)} |`);
+            }
+            const marker = '<!-- efs-pr-performance -->';
+            const body = `${marker}\n## PostgreSQL performance comparison\n\nBase \`${run.pull_requests?.[0]?.base?.sha?.slice(0, 12) || 'target'}\` → PR \`${run.head_sha.slice(0, 12)}\`. Values average two runs per revision on the same GitHub runner. The same PR-supplied test-only harness is applied to the target checkout; its production sources remain at the base revision.\n\n| Mode | Measure | Base | PR | Change |\n| --- | --- | ---: | ---: | ---: |\n${rows.join('\n')}\n\nPerformance deltas are informational; no owner-approved timing threshold exists. Review workload details in the [benchmark run](${run.html_url}). Runner and JVM variation remain, so use a reported change as a signal to investigate rather than as a definitive regression.\n`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              per_page: 100,
+            });
+            const existing = comments.find(comment => comment.user?.type === 'Bot' && comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body,
+              });
+            }

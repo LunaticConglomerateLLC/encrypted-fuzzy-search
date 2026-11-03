@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Benchmark methodology — Encrypted Fuzzy Search</title>
+  <style>
+    :root { font: 16px/1.6 system-ui, sans-serif; color: #172033; background: #f6f8fb; }
+    body { max-width: 850px; margin: 0 auto; padding: 2rem 1.25rem; }
+    article { background: white; border: 1px solid #dce3ed; border-radius: 12px; padding: 1.5rem; }
+    h1, h2 { line-height: 1.2; } code { background: #eef2f7; padding: .1rem .3rem; border-radius: 4px; }
+    a { color: #1457b8; }
+  </style>
+</head>
+<body><article>
+  <p><a href="index.html">← Latest performance report</a></p>
+  <h1>Benchmark methodology</h1>
+  <p>The publication workflow runs a deterministic synthetic workload against a disposable PostgreSQL service after each push to the default branch. It measures the merged source revision and publishes its aggregate JSON report with the rebuilt site.</p>
+  <h2>Matched modes</h2>
+  <p><code>EFS_FULL</code> stores encrypted payloads and protected search tokens. <code>PLAINTEXT_CONTROL</code> stores generated plaintext values and raw n-grams solely as a synthetic comparison control. Neither mode uses customer data.</p>
+  <h2>Measurements</h2>
+  <p>The report separates completed throughput, warm p50/p95/p99 latency, final-match recall and precision, no-match false positives, failures/timeouts, indexing throughput, PostgreSQL relation sizes, and JVM/database/host context. Both modes use the same generated records, labels, query mix, candidate limit, database configuration, and concurrency settings.</p>
+  <h2>Limits</h2>
+  <p>These runs are repeatable indicators, not service-level guarantees. Runner noise, JVM scheduling, caches, and PostgreSQL scheduling affect results. No numeric performance threshold is currently approved; PR comparisons report deltas without blocking on timing.</p>
+  <p>For the full corpus, fixture, and privacy contract, see <a href="https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/blob/main/BENCHMARKING.md">BENCHMARKING.md</a>.</p>
+</article></body>
+</html>

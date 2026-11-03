@@ -13,4 +13,5 @@ include(
     "search-core",
     "postgres-adapter",
     "spring-boot-starter",
+    "jmh-benchmarks",
 )

@@ -14,3 +14,13 @@ tasks.register<JavaExec>("fuzzySearchBenchmark") {
     mainClass.set(
         "io.github.lunaticconglomeratellc.encryptedfuzzysearch.postgres.FuzzySearchBenchmark")
 }
+
+tasks.register<JavaExec>("postgresLoadBenchmark") {
+    group = "verification"
+    description = "Runs concurrent synthetic plaintext and EFS search loads against Compose PostgreSQL."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets["test"].runtimeClasspath
+    setExecutable("${System.getProperty("java.home")}/bin/java")
+    mainClass.set(
+        "io.github.lunaticconglomeratellc.encryptedfuzzysearch.postgres.PostgresLoadBenchmark")
+}
