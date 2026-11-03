@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.0](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/compare/v3.0.0...v3.1.0) (2026-11-03)
+
+
+### Features
+
+* benchmarking performance contracts ([#16](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/issues/16)) ([bfd4c4a](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/commit/bfd4c4a00a18ce269a4a9a6755a8b8e64825c43b))
+
 ## [3.0.0](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/compare/v2.0.0...v3.0.0) (2026-11-02)
 
 
