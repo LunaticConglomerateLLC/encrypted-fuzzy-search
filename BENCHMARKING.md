@@ -18,6 +18,40 @@ Measure candidate retrieval separately from authorized final verification. Candi
 
 Compare strategies against the same versioned corpus, entity-disjoint query split, hardware/database setup, normalization version, and workload. Record all configuration choices and do not compare results produced with different candidate limits, transforms, or filtering rules as if they were equivalent.
 
+## Multilingual transform cost and expansion
+
+`jmh-benchmarks` includes `LanguageVariantBenchmark` for synthetic Chinese, Japanese, Arabic and Indic examples. It measures provider transform latency; regression tests lock the variant count for each benchmark sample so latency cannot hide a larger index/query expansion factor. Run it with:
+
+```bash
+./gradlew --no-daemon :jmh-benchmarks:jmh --args='LanguageVariantBenchmark -wi 5 -i 8 -f 2'
+```
+
+For each selected language, record the provider and immutable transform ID, throughput, and variants per input. These component numbers exclude protected-token generation, database candidate retrieval, decryption, and final verification. Use the paired PostgreSQL load benchmark to measure candidate volume, candidate recall/precision, final quality, and end-to-end latency before making an operational comparison. Keep timing informational until a representative workload and environment are approved. The language regression corpus is synthetic and intentionally small; its collision examples identify failure modes but are not population-level accuracy estimates.
+
+For latency distributions, run the same profile with `-bm sample` to report p50/p95/p99 rather than inferring tail latency from throughput:
+
+```bash
+./gradlew --no-daemon :jmh-benchmarks:jmh --args='LanguageVariantBenchmark -bm sample -wi 5 -i 8 -f 2'
+```
+
+### Exploratory multilingual component run (2026-11-03)
+
+The initial run showed repeated ICU transliterator construction dominating transform time, so the provider now caches one transliterator per transform ID and thread. The following warmed JMH 1.37 runs used Zulu OpenJDK 25.0.4.1 on macOS arm64, one thread, five 1-second warmup iterations, eight 1-second measurement iterations, and two forks. Throughput is mean operations per microsecond; the sample-time run reports per-call p50/p95/p99 in microseconds. The source checkout was dirty during these exploratory runs, and they are not target-branch comparisons or production SLOs.
+
+| Language tag | Synthetic input | Forms | Throughput (ops/µs) | p50 (µs) | p95 (µs) | p99 (µs) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `zh-Hans` | `重庆银行` | 4 | 0.030 ± 0.001 | 32.9 | 39.4 | 43.5 |
+| `ja-JP` | `東京都新宿区` | 3 | 0.179 ± 0.002 | 5.3 | 6.6 | 7.2 |
+| `ar-Arab` | `القاهرة` | 2 | 0.593 ± 0.029 | 1.7 | 2.0 | 3.6 |
+| `hi-Deva` | `नमस्ते दुनिया` | 3 | 0.257 ± 0.004 | 3.7 | 4.5 | 4.9 |
+| `ta-Taml` | `தமிழ்நாடு` | 2 | 0.362 ± 0.003 | 2.7 | 3.2 | 3.5 |
+
+An equivalent pre-cache exploratory run measured about 0.013, 0.181, 0.045, 0.031 and 0.033 ops/µs respectively. Thread-local ICU reuse raised Chinese throughput about 2.3×, Arabic about 13×, Hindi about 8× and Tamil about 11×; Japanese was unchanged because it uses Kuromoji plus a thread-local ICU transliterator. The test corpus locks the shown form counts. The Chinese transform remains the slowest sample and expands to four forms; measure that profile with protected-token generation and PostgreSQL candidate loads before adopting it for high-throughput fields.
+
+### Alias and mixed-script collision evaluation
+
+The synthetic service test indexes a Latin `PayPal` entity and a distinct Greek-rho lookalike `ΡayPal`, then searches the Greek form with the caller-supplied Latin alias. Both exact candidates are returned: 1 relevant of 2 results, precision 50%, recall 100% for the intended entity in this two-row fixture. This demonstrates that a known alias is an asserted equivalence and does not resolve mixed-script confusables; it is a targeted hard negative, not a corpus-wide false-positive estimate. Alias provenance stays distinct from language-provider provenance, and production-default policy continues to disable aliases.
+
 ## Corpus and fixture policy
 
 ### Default synthetic fixtures
