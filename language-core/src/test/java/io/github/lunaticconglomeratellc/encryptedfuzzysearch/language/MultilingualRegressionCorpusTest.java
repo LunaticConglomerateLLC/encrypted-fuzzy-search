@@ -39,15 +39,22 @@ public class MultilingualRegressionCorpusTest {
             LanguageVariantProvider selected = providerFor(fields[1]);
             List<TransliterationVariant> variants =
                 selected.variantsForLanguage(fields[2], fields[0]);
-            assertTrue(
-                variants.stream().anyMatch(variant -> variant.value().equals(fields[3])),
-                fields[0]
-                    + " should emit "
-                    + fields[3]
-                    + " for "
-                    + fields[2]
-                    + "; got "
-                    + variants);
+            if ("LATIN".equals(fields[3])) {
+              assertTrue(
+                  variants.stream()
+                      .anyMatch(variant -> variant.kind() == TransliterationVariant.Kind.LATIN),
+                  fields[0] + " should emit a Latin form for " + fields[2] + "; got " + variants);
+            } else {
+              assertTrue(
+                  variants.stream().anyMatch(variant -> variant.value().equals(fields[3])),
+                  fields[0]
+                      + " should emit "
+                      + fields[3]
+                      + " for "
+                      + fields[2]
+                      + "; got "
+                      + variants);
+            }
           }
         }
       }

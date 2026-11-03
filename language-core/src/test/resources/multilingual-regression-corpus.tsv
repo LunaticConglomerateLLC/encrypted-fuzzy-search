@@ -4,7 +4,14 @@ zh-Hans	icu4j	nǐ hǎo	ni hao
 ja-JP	lucene-kuromoji	東京	toukyou
 ar-Arab	icu4j	القاهرة	ạlqạhrẗ
 hi-Deva	icu4j	नमस्ते	namastē
+bn-Beng	icu4j	বাংলা	LATIN
+gu-Gujr	icu4j	ગુજરાત	LATIN
+pa-Guru	icu4j	ਪੰਜਾਬ	LATIN
 ta-Taml	icu4j	தமிழ்	tamiḻ
+te-Telu	icu4j	తెలుగు	LATIN
+kn-Knda	icu4j	ಕನ್ನಡ	LATIN
+ml-Mlym	icu4j	മലയാളം	LATIN
+or-Orya	icu4j	ଓଡ଼ିଶା	LATIN
 ru	icu4j	Москва	UNSUPPORTED
 el	icu4j	Αθήνα	UNSUPPORTED
 ja-JP	icu4j	東京	UNSUPPORTED

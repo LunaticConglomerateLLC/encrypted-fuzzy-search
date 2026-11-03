@@ -22,8 +22,14 @@ import org.openjdk.jmh.annotations.Warmup;
 @Fork(2)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 public class LanguageVariantBenchmark {
-  @Param({"zh-Hans", "ja-JP", "ar-Arab", "hi-Deva", "ta-Taml"})
+  @Param({
+    "zh-Hans", "ja-JP", "ar-Arab", "hi-Deva", "bn-Beng", "gu-Gujr", "pa-Guru", "ta-Taml", "te-Telu",
+    "kn-Knda", "ml-Mlym", "or-Orya"
+  })
   public String languageTag;
+
+  @Param({"synthetic-language-regression-v1"})
+  public String inputGenerator;
 
   @Param({"unknown"})
   public String sourceRevision;
@@ -46,7 +52,14 @@ public class LanguageVariantBenchmark {
             case "zh-Hans" -> "重庆银行";
             case "ar-Arab" -> "القاهرة";
             case "hi-Deva" -> "नमस्ते दुनिया";
+            case "bn-Beng" -> "বাংলা";
+            case "gu-Gujr" -> "ગુજરાત";
+            case "pa-Guru" -> "ਪੰਜਾਬ";
             case "ta-Taml" -> "தமிழ்நாடு";
+            case "te-Telu" -> "తెలుగు";
+            case "kn-Knda" -> "ಕನ್ನಡ";
+            case "ml-Mlym" -> "മലയാളം";
+            case "or-Orya" -> "ଓଡ଼ିଶା";
             default -> throw new IllegalArgumentException("unsupported benchmark language");
           };
     }

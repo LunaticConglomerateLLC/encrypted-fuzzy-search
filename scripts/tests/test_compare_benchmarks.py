@@ -72,6 +72,58 @@ def report(revision: str, qps: float = 100.0) -> dict:
     }
 
 
+def language_report(revision: str) -> dict:
+    tags = (
+        "zh-Hans",
+        "ja-JP",
+        "ar-Arab",
+        "hi-Deva",
+        "bn-Beng",
+        "gu-Gujr",
+        "pa-Guru",
+        "ta-Taml",
+        "te-Telu",
+        "kn-Knda",
+        "ml-Mlym",
+        "or-Orya",
+    )
+    return {
+        "schema": "efs.multilingual-component-report.v1",
+        "source_revision": revision,
+        "source_tree_dirty": False,
+        "workload": {"input_generator": "synthetic-language-regression-v1", "synthetic": True},
+        "environment": {
+            "jmh_version": "1.37",
+            "java_version": "25.0.4.1",
+            "java_vm": "OpenJDK",
+            "java_vm_version": "25.0.4.1+1-LTS",
+            "os_name": "Linux",
+            "os_version": "runner",
+            "architecture": "x86_64",
+            "processor_count": 4,
+            "threads": 1,
+            "forks": 2,
+            "warmup_iterations": 3,
+            "warmup_time": "1 s",
+            "measurement_iterations": 5,
+            "measurement_time": "1 s",
+        },
+        "results": [
+            {
+                "language_tag": tag,
+                "provider_id": "lucene-kuromoji" if tag == "ja-JP" else "icu4j",
+                "transform_id": "synthetic-transform-v1",
+                "throughput_ops_per_microsecond": 0.5,
+                "latency_mean_microseconds": 2.0,
+                "latency_p50_microseconds": 1.8,
+                "latency_p95_microseconds": 2.2,
+                "latency_p99_microseconds": 2.5,
+            }
+            for tag in tags
+        ],
+    }
+
+
 class CompareBenchmarksTest(unittest.TestCase):
     def test_computes_mode_specific_percent_changes(self) -> None:
         comparison = compare_reports(report("b" * 40, 100.0), report("a" * 40, 110.0))
@@ -158,14 +210,23 @@ class CompareBenchmarksTest(unittest.TestCase):
     def test_builds_documentation_site_with_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             sample_path = Path(temporary) / "report.json"
+            language_path = Path(temporary) / "language-report.json"
             output = Path(temporary) / "site"
             sample_path.write_text(json.dumps(report("b" * 40)), encoding="utf-8")
-            build(sample_path, output, expected_revision="b" * 40)
+            language_path.write_text(json.dumps(language_report("b" * 40)), encoding="utf-8")
+            build(sample_path, output, expected_revision="b" * 40, language_report_path=language_path)
             self.assertTrue((output / "index.html").is_file())
             self.assertTrue((output / "benchmarking.html").is_file())
+            self.assertTrue((output / "data/language-jmh.json").is_file())
             self.assertEqual(
                 "efs.benchmark-report.v1",
                 json.loads((output / "data/latest.json").read_text(encoding="utf-8"))["schema"],
+            )
+            self.assertEqual(
+                "efs.multilingual-component-report.v1",
+                json.loads(
+                    (output / "data/language-jmh.json").read_text(encoding="utf-8")
+                )["schema"],
             )
             shutil.rmtree(output, ignore_errors=True)
 
@@ -175,6 +236,20 @@ class CompareBenchmarksTest(unittest.TestCase):
             report_path.write_text(json.dumps(report("b" * 40)), encoding="utf-8")
             with self.assertRaises(ValueError):
                 build(report_path, Path(temporary) / "site", expected_revision="a" * 40)
+
+    def test_site_build_rejects_language_report_for_wrong_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            report_path = Path(temporary) / "report.json"
+            language_path = Path(temporary) / "language-report.json"
+            report_path.write_text(json.dumps(report("a" * 40)), encoding="utf-8")
+            language_path.write_text(json.dumps(language_report("b" * 40)), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                build(
+                    report_path,
+                    Path(temporary) / "site",
+                    expected_revision="a" * 40,
+                    language_report_path=language_path,
+                )
 
 
 if __name__ == "__main__":
