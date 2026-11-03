@@ -5,9 +5,11 @@ import com.ibm.icu.lang.UCharacterCategory;
 import com.ibm.icu.text.Normalizer2;
 import com.ibm.icu.text.Transliterator;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -27,6 +29,9 @@ public final class Icu4jTransliterationProvider implements LanguageVariantProvid
 
   /** Maximum forms produced by this profile: original, transliterated, tone-folded, and compact. */
   public static final int MAX_VARIANT_COUNT = 4;
+
+  private static final ThreadLocal<Map<String, Transliterator>> TRANSLITERATORS =
+      ThreadLocal.withInitial(HashMap::new);
 
   private final CanonicalTextNormalizer canonicalTextNormalizer;
 
@@ -83,20 +88,23 @@ public final class Icu4jTransliterationProvider implements LanguageVariantProvid
 
     String latin =
         canonicalTextNormalizer.normalize(
-            Transliterator.getInstance(profile.transliteratorId()).transliterate(original));
+            transliterator(profile.transliteratorId()).transliterate(original));
     validateSize(latin, "transliteration output");
     addDistinctVariant(
         variants, emittedValues, TransliterationVariant.Kind.LATIN, profile.transformId(), latin);
 
-    String toneFolded = foldPinyinToneMarks(latin);
-    validateSize(toneFolded, "tone-folded output");
-    addDistinctVariant(
-        variants,
-        emittedValues,
-        TransliterationVariant.Kind.TONE_FOLDED_LATIN,
-        profile.transformId(),
-        toneFolded);
-    String compact = removeWhitespace(toneFolded);
+    String compactSource = latin;
+    if (profile.foldsPinyinToneMarks()) {
+      compactSource = foldPinyinToneMarks(latin);
+      validateSize(compactSource, "tone-folded output");
+      addDistinctVariant(
+          variants,
+          emittedValues,
+          TransliterationVariant.Kind.TONE_FOLDED_LATIN,
+          profile.transformId(),
+          compactSource);
+    }
+    String compact = removeWhitespace(compactSource);
     validateSize(compact, "compact output");
     addDistinctVariant(
         variants,
@@ -112,6 +120,10 @@ public final class Icu4jTransliterationProvider implements LanguageVariantProvid
       throw new IllegalArgumentException(
           description + " exceeds " + MAX_CODE_POINTS_PER_FORM + " code points");
     }
+  }
+
+  private static Transliterator transliterator(String id) {
+    return TRANSLITERATORS.get().computeIfAbsent(id, Transliterator::getInstance);
   }
 
   private static void addDistinctVariant(
