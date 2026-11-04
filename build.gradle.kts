@@ -5,7 +5,7 @@ plugins {
     id("org.owasp.dependencycheck") version "13.0.0"
     id("org.cyclonedx.bom") version "3.5.1"
 }
-version = "3.1.0" // x-release-please-version
+version = "4.0.0" // x-release-please-version
 
 spotless {
     java {
