@@ -45,6 +45,8 @@ docker compose -f compose.test.yaml down --volumes --remove-orphans
 
 The Compose database binds only to loopback, uses test-only credentials, and stores data in the disposable container layer. For a failed test run, stop and remove it with the same `docker compose ... down` command.
 
+For focused feedback, run `./gradlew --no-daemon :postgres-adapter:test` for the adapter's unit tests or `./gradlew --no-daemon :postgres-adapter:functionalTest` for its PostgreSQL-backed suite. The functional task requires the Compose database to be running; `check` runs both suites and includes both in the adapter's coverage report.
+
 Tests are required for implementation changes. The project target is at least 90% line coverage per module containing production sources.
 CI checks formatting and Java compiler warnings, runs tests on JDK 21 and 25, and enforces the coverage threshold for modules with production code. The dependency audit and release workflow are described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
