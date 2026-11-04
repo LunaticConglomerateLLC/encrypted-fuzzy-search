@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.0.0](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/compare/v3.1.0...v4.0.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* multilingual intelligence ([#20](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/issues/20))
+* multilingual intelligence ([#18](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/issues/18))
+
+### Features
+
+* multilingual intelligence ([#18](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/issues/18)) ([cc2c890](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/commit/cc2c890a194e14f91951112ed04d43af2ac27bcd))
+* multilingual intelligence ([#20](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/issues/20)) ([1be84c9](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/commit/1be84c9642e233d104b46242e6654d5a099a59a4))
+
 ## [3.1.0](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/compare/v3.0.0...v3.1.0) (2026-11-03)
 
 
