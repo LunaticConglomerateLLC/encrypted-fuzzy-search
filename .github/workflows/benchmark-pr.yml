@@ -106,12 +106,12 @@ jobs:
           --args='LanguageVariantBenchmark -bm thrpt,sample -wi 3 -i 5 -f 2
           -rf json -rff build/reports/jmh/language-jmh-raw.json'
       - name: Normalize and validate multilingual results
-        working-directory: candidate
-        run: >-
-          python3 scripts/prepare_language_benchmark_report.py
-          jmh-benchmarks/build/reports/jmh/language-jmh-raw.json
-          --json-out comparison/language-jmh.json
-          --expected-revision '${{ github.event.pull_request.head.sha }}'
+        run: |
+          mkdir -p comparison
+          python3 candidate/scripts/prepare_language_benchmark_report.py \
+            candidate/jmh-benchmarks/build/reports/jmh/language-jmh-raw.json \
+            --json-out comparison/language-jmh.json \
+            --expected-revision '${{ github.event.pull_request.head.sha }}'
       - name: Compare aggregate reports
         run: >-
           python3 candidate/scripts/compare_benchmarks.py
