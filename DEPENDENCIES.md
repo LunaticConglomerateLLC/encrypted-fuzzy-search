@@ -13,7 +13,7 @@ Do not add proprietary, commercial-only, source-available, or non-commercial dep
 - `postgres-adapter`: PostgreSQL JDBC driver (`org.postgresql:postgresql:42.7.13`) at runtime to implement the JDBC adapter. The driver is licensed under BSD-2-Clause; tests use only the standard JDBC API and the same runtime driver.
 - `spring-boot-starter`: Spring Boot auto-configuration (`org.springframework.boot:spring-boot-autoconfigure:4.1.1`) at runtime, licensed under Apache-2.0. Spring Boot Test (`spring-boot-test:4.1.1`) and AssertJ (`assertj-core:3.27.7`) are test-only dependencies, both Apache-2.0. The Kotlin Gradle plugin and standard library (`2.4.21`, Apache-2.0) compile the Kotlin consumer integration test; Kotlin is not a runtime dependency of the starter.
 - `language-core`: ICU4J (`com.ibm.icu:icu4j:78.3`) at runtime for deterministic, language-profiled Unicode transliteration. ICU4J is licensed under Unicode-3.0; the transform profile pins its provider version as part of the persisted transform identifier.
-- Documentation build: MkDocs (`1.6.1`, BSD-2-Clause), MkDocs Material (`9.6.9`, MIT), and PyMdown Extensions (`12.3`, MIT) are pinned in `docs/requirements.txt`. They are documentation-only tools and are not runtime dependencies of the Java library.
+- Documentation build: MkDocs (`1.6.1`, BSD-2-Clause), MkDocs Material (`9.8.1`, MIT), and PyMdown Extensions (`12.3`, MIT) are pinned in `docs/requirements.txt`. They are documentation-only tools and are not runtime dependencies of the Java library.
 
 ## Review expectations
 
