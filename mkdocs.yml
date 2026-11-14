@@ -1,0 +1,68 @@
+site_name: Encrypted Fuzzy Search
+site_description: A Java library for encrypted field storage and fuzzy candidate search.
+site_url: https://wearelunatic.com/encrypted-fuzzy-search/
+repo_url: https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search
+repo_name: LunaticConglomerateLLC/encrypted-fuzzy-search
+edit_uri: edit/main/docs/
+copyright: Licensed under the Apache License, Version 2.0.
+
+# Fail CI on broken navigation, links, or configuration.
+strict: true
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  font: false
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Overview: getting-started/index.md
+      - Build from source: getting-started/installation.md
+      - First search: getting-started/quickstart.md
+  - Use EFS:
+      - Search modes: guides/search-modes.md
+      - Java and Spring Boot: guides/spring-boot.md
+      - PostgreSQL: guides/postgresql.md
+      - Multilingual search: guides/multilingual.md
+      - Key rotation: guides/key-rotation.md
+  - Security:
+      - Security boundaries: security/index.md
+  - Reference:
+      - Architecture and modules: reference/architecture.md
+      - API map: reference/api-map.md
+      - Configuration and limits: reference/limits.md
+  - Benchmarks:
+      - Method and interpretation: benchmarks/index.md
+      - Latest reports: benchmarks/latest.md
+
