@@ -1,6 +1,5 @@
 import copy
 import json
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +28,7 @@ def report(revision: str, qps: float = 100.0) -> dict:
                 "final_recall": 1.0,
                 "final_precision": 1.0,
                 "no_match_false_positive_rate": 0.0,
+                "candidate_limit_saturation_rate": 0.0,
                 "failures": 0,
                 "timeouts": 0,
                 "postgres_token_relation_bytes": 4096,
@@ -207,17 +207,19 @@ class CompareBenchmarksTest(unittest.TestCase):
         with self.assertRaises(BenchmarkReportError):
             compare_reports(report("b" * 40), candidate)
 
-    def test_builds_documentation_site_with_report(self) -> None:
+    def test_adds_validated_reports_to_existing_mkdocs_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             sample_path = Path(temporary) / "report.json"
             language_path = Path(temporary) / "language-report.json"
             output = Path(temporary) / "site"
+            output.mkdir()
+            (output / "index.html").write_text("MkDocs home", encoding="utf-8")
             sample_path.write_text(json.dumps(report("b" * 40)), encoding="utf-8")
             language_path.write_text(json.dumps(language_report("b" * 40)), encoding="utf-8")
             build(sample_path, output, expected_revision="b" * 40, language_report_path=language_path)
             self.assertTrue((output / "index.html").is_file())
-            self.assertTrue((output / "benchmarking.html").is_file())
             self.assertTrue((output / "data/language-jmh.json").is_file())
+            self.assertEqual("MkDocs home", (output / "index.html").read_text(encoding="utf-8"))
             self.assertEqual(
                 "efs.benchmark-report.v1",
                 json.loads((output / "data/latest.json").read_text(encoding="utf-8"))["schema"],
@@ -228,7 +230,13 @@ class CompareBenchmarksTest(unittest.TestCase):
                     (output / "data/language-jmh.json").read_text(encoding="utf-8")
                 )["schema"],
             )
-            shutil.rmtree(output, ignore_errors=True)
+
+    def test_site_injection_requires_a_built_mkdocs_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            report_path = Path(temporary) / "report.json"
+            report_path.write_text(json.dumps(report("b" * 40)), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "MkDocs output directory"):
+                build(report_path, Path(temporary) / "site", expected_revision="b" * 40)
 
     def test_site_build_rejects_wrong_merged_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
