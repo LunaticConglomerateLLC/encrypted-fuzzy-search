@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble the static documentation site and its latest aggregate report."""
+"""Validate and add fresh benchmark JSON reports to a MkDocs site directory."""
 
 from __future__ import annotations
 
@@ -90,6 +90,8 @@ def build(
     expected_revision: str | None = None,
     language_report_path: Path | None = None,
 ) -> None:
+    if not output.is_dir() or not (output / "index.html").is_file():
+        raise ValueError("MkDocs output directory must exist and contain index.html")
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if report.get("schema") != "efs.benchmark-report.v1":
         raise ValueError("benchmark report has an unsupported schema")
@@ -127,6 +129,7 @@ def build(
         "final_recall",
         "final_precision",
         "no_match_false_positive_rate",
+        "candidate_limit_saturation_rate",
         "failures",
         "timeouts",
         "index_records_per_second",
@@ -147,14 +150,11 @@ def build(
         if language_report_path is not None
         else None
     )
-    if output.exists():
-        shutil.rmtree(output)
-    (output / "data").mkdir(parents=True)
-    shutil.copy2(Path("docs/index.html"), output / "index.html")
-    shutil.copy2(Path("docs/benchmarking.html"), output / "benchmarking.html")
-    shutil.copy2(report_path, output / "data/latest.json")
+    data_directory = output / "data"
+    data_directory.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(report_path, data_directory / "latest.json")
     if language_report is not None:
-        shutil.copy2(language_report_path, output / "data/language-jmh.json")
+        shutil.copy2(language_report_path, data_directory / "language-jmh.json")
 
 
 def main() -> None:

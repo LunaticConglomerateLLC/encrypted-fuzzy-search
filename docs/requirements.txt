@@ -1,0 +1,4 @@
+# Use the same tested MkDocs toolchain as the PRiSK documentation site.
+mkdocs==1.6.1
+mkdocs-material==9.8.1
+pymdown-extensions==12.3
