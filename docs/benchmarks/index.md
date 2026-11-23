@@ -1,6 +1,6 @@
 # Benchmark method and interpretation
 
-EFS maintains two separate performance views. PostgreSQL load runs compare the full Java/PostgreSQL EFS path with a plaintext test control. JMH runs measure the cost of individual language transforms. Neither run contains customer data, and neither sets a production service-level guarantee.
+EFS reports two kinds of performance measurements. PostgreSQL load runs compare the full Java and PostgreSQL search path with a plaintext test control. JMH runs measure the cost of individual language transforms. Both use synthetic data. Neither provides a production service-level guarantee.
 
 ## PostgreSQL load benchmark
 
@@ -17,7 +17,7 @@ docker compose -f compose.test.yaml down --volumes --remove-orphans
 
 For a fast smoke run, reduce the records to 60, concurrency to 2, and measurement and warmup to one second. A smoke run checks that the harness works; its timing is not comparable with the longer profile.
 
-`EFS_FULL` encrypts payloads and stores keyed n-gram postings. `PLAINTEXT_CONTROL` stores generated plaintext and raw n-grams only in the disposable benchmark database. It is a performance control, not an alternative security design. The modes use generated data and the runner checks their labeled matching behavior before reporting results.
+`EFS_FULL` encrypts payloads and stores keyed n-gram postings. `PLAINTEXT_CONTROL` stores generated plaintext and raw n-grams in the disposable benchmark database. It exists only to provide a performance comparison; it is not an alternative security design. The benchmark uses generated data and checks each mode's labeled matching behavior before reporting results.
 
 The report includes warm p50/p95/p99 latency, completed queries per second, failures and timeouts, indexing throughput, correctness, candidate-limit saturation, JVM and PostgreSQL context, and relation sizes. It reports the measured revision and workload. Different local machines and runner load can change the timing.
 
@@ -35,4 +35,4 @@ JMH measures provider transformation cost on small synthetic text examples. Thro
 - Storage sizes depend on the synthetic corpus and PostgreSQL configuration. Logical token bytes and relation sizes are different measures.
 - Timing deltas are informational. No owner-approved throughput, latency, encryption-overhead, or capacity threshold exists.
 
-Always interpret performance with matching accuracy and candidate volume. High final precision on one fixture does not make low candidate precision or cap saturation harmless. The [latest published reports](latest.md) include the measured revisions and runtime settings. For the detailed fixture and command options, see [BENCHMARKING.md](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/blob/main/BENCHMARKING.md).
+Read performance together with matching accuracy and candidate volume. High final precision on one fixture does not make low candidate precision or frequent candidate-limit saturation harmless. The [latest published reports](latest.md) include the measured revisions and runtime settings. For the full fixture description and command options, see [BENCHMARKING.md](https://github.com/LunaticConglomerateLLC/encrypted-fuzzy-search/blob/main/BENCHMARKING.md).

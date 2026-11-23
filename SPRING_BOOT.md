@@ -1,6 +1,6 @@
 # Spring Boot integration
 
-`spring-boot-starter` is an optional adapter. `search-core`, `crypto-core`, and `language-core` remain framework-independent. Spring Boot 4.1 auto-configuration creates a `PostgresTokenIndexRepository` when the application has a `DataSource`; it creates `EncryptedFuzzySearchService` only when a `MasterKeyProvider` and `TokenIndexRepository` are available. The application can replace any default bean by providing its own bean of that type.
+`spring-boot-starter` is optional. The search, cryptography, and language modules do not depend on Spring. With a configured `DataSource`, Spring Boot 4.1 creates a `PostgresTokenIndexRepository`. It creates `EncryptedFuzzySearchService` only when both a `MasterKeyProvider` and a `TokenIndexRepository` are available. You can replace any default bean by providing your own bean of the same type.
 
 The starter never generates or configures root key material. Load keys from the application's secret manager, KMS, or HSM-compatible provider and return them by opaque key ID. Do not put key bytes in application properties, source files, or logs.
 

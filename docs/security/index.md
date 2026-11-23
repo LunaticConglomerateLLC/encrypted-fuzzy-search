@@ -1,10 +1,10 @@
 # Security boundaries
 
-EFS protects stored field values with authenticated encryption and uses keyed tokens for candidate search. The design leaves observable structure in the searchable index. It is not oblivious search and has no zero-leakage claim.
+EFS encrypts stored field values and uses keyed tokens to find search candidates. Those tokens still reveal patterns about the data and queries. EFS does not hide access patterns or promise zero leakage.
 
 ## What the database can observe
 
-An observer with access to database contents or query execution may learn:
+Someone who can inspect the database or observe its queries may learn:
 
 | Strategy | Persisted leakage |
 | --- | --- |
@@ -12,11 +12,11 @@ An observer with access to database contents or query execution may learn:
 | Bigram/trigram tokens | Token equality and frequency, which grams co-occur, overlap patterns, and posting-list sizes. |
 | Any strategy | Record counts and identifiers, tenant/field partitions, key and transform versions, token volume, and potentially query, access, timing, and result-size patterns. |
 
-Fuzzy search creates several correlated tokens per value, so an observer may infer more than with an exact-only index. Auxiliary information can make those patterns easier to interpret. Keyed tokens are not ciphertext and do not hide equality or overlap.
+Fuzzy search creates several related tokens for each value. This can reveal more patterns than an exact-only index, especially when the observer has other information about the data. Keyed tokens are not ciphertext: they still reveal equality and overlap.
 
 ## What stays in application memory
 
-Plaintext is available to the application while it normalizes and indexes a value. During search, the application decrypts shortlisted candidates and runs final verification. A compromised application process with access to keys or plaintext can read or misuse them. EFS does not protect data from a compromised authorized service.
+The application handles plaintext while it normalizes and indexes a value. During a search, it decrypts the candidate records and checks which ones match. Anyone who compromises an application process that has the keys or plaintext may read or misuse that data. EFS does not protect data from a compromised service that is authorized to use it.
 
 ## Responsibilities of the host application
 

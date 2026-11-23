@@ -1,6 +1,6 @@
 # Encrypted Fuzzy Search
 
-Encrypted Fuzzy Search (EFS) is a Java library for applications that need to search fields stored as ciphertext. It creates keyed search tokens so PostgreSQL can find candidate records without storing plaintext search values or raw character grams.
+Encrypted Fuzzy Search (EFS) is a Java-first library for Java and Kotlin applications that need to search fields stored as ciphertext. It creates keyed search tokens so PostgreSQL can find candidate records without storing plaintext search values or raw character grams.
 
 The application still sees plaintext while it encrypts a value and while it verifies search candidates. The database also sees structure in the token index. EFS reduces what is stored in the database; it does not make searchable data invisible.
 
@@ -23,7 +23,7 @@ The application still sees plaintext while it encrypts a value and while it veri
 ## Start here
 
 1. Read [whether EFS fits your use case](getting-started/index.md).
-2. Follow the [source build and quickstart](getting-started/installation.md).
+2. [Build EFS from source](getting-started/installation.md), then follow the [first-search example](getting-started/quickstart.md).
 3. Review [search modes and their accuracy contracts](guides/search-modes.md) before choosing a query type.
 4. Read the [security boundaries](security/index.md) before storing real data.
 

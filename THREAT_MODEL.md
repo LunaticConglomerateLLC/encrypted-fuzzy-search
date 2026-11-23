@@ -2,6 +2,8 @@
 
 **Status:** the project owner accepts the exact and character n-gram baseline leakage profile and explicitly keeps the opt-in deletion, Soundex, prefix, and multilingual strategies outside the production allowlist. This is not a security certification.
 
+In plain terms, EFS keeps field values encrypted in the database, but its search index still exposes patterns. The application and its key provider must be trusted with plaintext and keys. This review describes what a database observer may learn and which search strategies are currently accepted.
+
 ## Scope and security objective
 
 The design stores application fields as randomized authenticated ciphertext and supports candidate retrieval using deterministic keyed tokens derived from normalized search forms. The objective is to keep field plaintext, raw grams, and transformed search forms out of the database and its backups, while allowing an authorized application to retrieve and verify likely matches.

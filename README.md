@@ -1,8 +1,8 @@
 # Encrypted Fuzzy Search
 
-Encrypted Fuzzy Search is an early-stage Java and Kotlin library project for searching encrypted application data. The goal is to support exact and approximate candidate retrieval without persisting plaintext search terms, while making the security and accuracy trade-offs visible to application teams.
+Encrypted Fuzzy Search (EFS) is a Java-first library for applications that need to search fields stored as ciphertext. It creates keyed search tokens so a database can find candidate records without storing plaintext search values or raw character grams. The application decrypts and checks those candidates before returning matches.
 
-The project has released v0.1.0, its cryptographic foundation. Current development adds protected fuzzy search and opt-in multilingual variants, initially for Simplified Chinese (`zh-Hans`) using transliteration rather than translation. APIs remain early-stage and may change; see [ARCHITECTURE.md](ARCHITECTURE.md) for supported profiles, limits, leakage, and reindexing requirements.
+EFS is an early-stage project, and its APIs may change. Its first cryptographic foundation release was v0.1.0; later work has added protected fuzzy search, PostgreSQL integration, multilingual experiments, and performance reporting. See [ARCHITECTURE.md](ARCHITECTURE.md) for supported profiles, limits, leakage, and reindexing requirements.
 
 ## What the library is intended to provide
 
@@ -10,7 +10,7 @@ The project has released v0.1.0, its cryptographic foundation. Current developme
 - Keyed indexes for exact and fuzzy candidate retrieval.
 - Authorized final verification and ranking in the application.
 - Explicit exact, bounded-fuzzy, and approximate search contracts with completeness metadata.
-- Opt-in caller-supplied aliases and explicitly selected transliteration providers.
+- Optional caller-supplied aliases and explicitly selected transliteration providers; these are outside the production allowlist.
 - Experimental final-scoring profiles for edit, token, and candidate-local ranking comparisons.
 - Explicitly allowlisted isotonic score calibration with held-out evaluation metrics.
 - Unicode normalization and multilingual search variants.
@@ -30,7 +30,7 @@ This project does not promise zero-leakage search. A database containing protect
 
 See [SPRING_BOOT.md](SPRING_BOOT.md) for Spring Boot auto-configuration and Java/Kotlin consumer examples.
 
-The bytecode target is Java 21 to keep the library usable by applications on the previous LTS baseline; CI will check it on JDK 21 and JDK 25. Gradle Kotlin DSL was selected for the multi-module build and its direct fit with Java/Kotlin projects, while the core API remains Java-first. Kotlin interoperability will be maintained without making the core depend on a framework.
+The project targets Java 21 bytecode and CI checks it on JDK 21 and 25. The public API is Java-first, with Kotlin interoperability checked in CI. The core does not depend on an application framework.
 
 ## Build and test
 

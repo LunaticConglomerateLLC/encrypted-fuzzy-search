@@ -1,6 +1,6 @@
 # Dependency and license policy
 
-The project is licensed under Apache-2.0. It is a permissive license for reuse and distribution, and includes a contributor patent grant that is useful for a cryptography-focused library. Keep runtime, test, build, and release dependencies open source and compatible with that distribution model.
+The project is licensed under Apache-2.0. Keep runtime, test, build, and release dependencies open source and compatible with that license.
 
 ## Default allowlist
 
