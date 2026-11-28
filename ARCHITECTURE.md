@@ -1,5 +1,7 @@
 # Architecture
 
+EFS stores each field as authenticated ciphertext and adds keyed tokens that help the database find possible matches. The application keeps the keys, decrypts the returned candidates, and decides which ones match. The searchable tokens still reveal equality, frequency, and overlap patterns; they do not hide how the index is used. The sections below describe the modules, data flow, and limits in detail.
+
 ## Module boundaries
 
 ```text
